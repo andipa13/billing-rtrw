@@ -71,6 +71,7 @@
           <thead>
             <tr>
               <th>#</th>
+              <th>ID</th>
               <th><%= t('admin.customers.table.name', 'Nama') %></th>
               <th><%= t('admin.customers.table.phone_tag', 'Telepon / Tag ONU') %></th>
               <th><%= t('admin.customers.table.package', 'Paket') %></th>
@@ -83,11 +84,12 @@
           </thead>
           <tbody>
           <% if (customers.length === 0) { %>
-            <tr><td colspan="8" class="text-center text-muted" style="padding:32px"><%= t('admin.customers.empty', 'Belum ada pelanggan') %></td></tr>
+            <tr><td colspan="10" class="text-center text-muted" style="padding:32px"><%= t('admin.customers.empty', 'Belum ada pelanggan') %></td></tr>
           <% } %>
           <% customers.forEach((c, i) => { %>
             <tr>
               <td class="text-muted"><%= i+1 %></td>
+              <td class="fw6" style="color:var(--primary)"><%= c.id %></td>
               <td class="fw6"><%= c.name %></td>
               <td>
                 <div><%= c.phone || '-' %></div>
