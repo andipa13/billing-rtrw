@@ -129,13 +129,13 @@ const parameterPaths = {
     'InternetGatewayDevice.DeviceInfo.UpTime',
     'Device.DeviceInfo.UpTime'
   ],
-  userConnected: [
+  ssid1Users: [
     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalAssociations',
+    'Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries'
+  ],
+  ssid2Users: [
     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.TotalAssociations',
-    'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
-    'Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries',
-    'Device.WiFi.AccessPoint.2.AssociatedDeviceNumberOfEntries',
-    'Device.Hosts.HostNumberOfEntries'
+    'Device.WiFi.AccessPoint.2.AssociatedDeviceNumberOfEntries'
   ]
 };
 
@@ -269,11 +269,19 @@ function mapDeviceData(device, tag) {
   const pppoeIP = getParameterWithPaths(device, parameterPaths.pppoeIP);
   const pppoeUsername = getParameterWithPaths(device, parameterPaths.pppUsername);
   const uptimeRaw = getParameterWithPaths(device, parameterPaths.uptime);
-  let totalAssociations = getParameterWithPaths(device, parameterPaths.userConnected);
+  let ssid1Count = getParameterWithPaths(device, parameterPaths.ssid1Users);
+  let ssid2Count = getParameterWithPaths(device, parameterPaths.ssid2Users);
 
-  // Fallback: If N/A or 0, count from connectedUsers list (LAN + WLAN)
-  if ((totalAssociations === 'N/A' || totalAssociations === 0 || totalAssociations === '0') && connectedUsers.length > 0) {
-    totalAssociations = connectedUsers.filter(u => u.status === 'Online').length;
+  // Fallback: if SSID1 count N/A/0, count WiFi users from host list by interface type (approximate)
+  if ((ssid1Count === 'N/A' || ssid1Count === 0 || ssid1Count === '0') && connectedUsers.length > 0) {
+    ssid1Count = connectedUsers.filter(u =>
+      u.status === 'Online' &&
+      /wireless|wifi|wlan|802\.11/i.test(u.iface)
+    ).length;
+  }
+  // Fallback: if SSID2 count N/A/0
+  if ((ssid2Count === 'N/A' || ssid2Count === 0 || ssid2Count === '0') && connectedUsers.length > 0) {
+    ssid2Count = 0;
   }
 
   function formatUptime(seconds) {
@@ -324,7 +332,9 @@ function mapDeviceData(device, tag) {
     softwareVersion,
     model,
     uptime,
-    totalAssociations
+    totalAssociations: (typeof ssid1Count === 'number' ? ssid1Count : 0) + (typeof ssid2Count === 'number' ? ssid2Count : 0),
+    ssid1Users: ssid1Count,
+    ssid2Users: ssid2Count
   };
 }
 
@@ -351,7 +361,9 @@ function fallbackCustomer(tag) {
     softwareVersion: '-',
     model: '-',
     uptime: '-',
-    totalAssociations: '-'
+    totalAssociations: '-',
+    ssid1Users: '-',
+    ssid2Users: '-'
   };
 }
 

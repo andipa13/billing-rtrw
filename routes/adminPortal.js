@@ -2048,6 +2048,8 @@ router.get('/api/devices', requireAdmin, async (req, res) => {
         model: mapped.model,
         softwareVersion: mapped.softwareVersion,
         userConnected: mapped.totalAssociations,
+        ssid1Users: mapped.ssid1Users,
+        ssid2Users: mapped.ssid2Users,
         ssid: mapped.ssid
       };
     });

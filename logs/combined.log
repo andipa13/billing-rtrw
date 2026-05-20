@@ -1,0 +1,12 @@
+2026-05-04 16:17:10 info: [settings] Memantau perubahan settings.json
+2026-05-04 16:17:10 info: [Backup] Created backup directory
+2026-05-04 16:17:10 info: [DB] Billing database ready
+2026-05-04 16:17:10 info: Attempting to start server on configured port: 3001
+2026-05-04 16:17:10 info: Mencoba memulai server pada port 3001...
+2026-05-04 16:17:10 info: [CRON] Semua tugas penjadwalan telah aktif.
+2026-05-04 16:17:10 info: [Backup] Auto backup scheduled: 0 2 * * *
+2026-05-04 16:17:10 info: Server berhasil berjalan pada port 3001
+2026-05-04 16:17:10 info: Environment: development
+2026-05-04 16:17:11 info: [WA] Connection Update: connecting
+2026-05-04 16:17:12 info: [WA] QR Code Baru Dihasilkan: 2@8ILvjB/v/JzpUr9eLT...
+2026-05-17 21:55:05 info: [settings] Memantau perubahan settings.json

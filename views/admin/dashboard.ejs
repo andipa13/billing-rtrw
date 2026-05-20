@@ -494,7 +494,7 @@ async function loadDevices() {
             <div style="font-size:12px;margin-bottom:2px" title="IP Address"><i class="bi bi-globe" style="color:var(--primary)"></i> ${d.pppoeIP !== '-' ? d.pppoeIP : I18N.noIp}</div>
             <div style="font-size:12px;margin-bottom:2px" title="PPPoE Username"><i class="bi bi-person-badge" style="color:var(--warning)"></i> ${d.pppoeUsername && d.pppoeUsername !== 'N/A' ? d.pppoeUsername : '<span class="text-muted">-</span>'}</div>
             <div style="font-size:12px;margin-bottom:2px" title="SSID"><i class="bi bi-wifi" style="color:var(--success)"></i> ${d.ssid}</div>
-            <div style="font-size:11px;color:var(--muted)"><i class="bi bi-people"></i> ${d.userConnected} ${I18N.connectedSuffix}</div>
+            <div style="font-size:11px;color:var(--muted)"><i class="bi bi-wifi" style="color:var(--success)"></i> SSID1: ${d.ssid1Users !== undefined ? d.ssid1Users : '?'} &nbsp;|&nbsp; <i class="bi bi-wifi" style="color:var(--info)"></i> SSID2: ${d.ssid2Users !== undefined ? d.ssid2Users : '?'}</div>
           </td>
           <td>
             <div><span class="badge ${isOn ? 'ds-on' : 'ds-off'}"><span class="dot ${isOn ? 'dot-on' : 'dot-off'}"></span>${isOn ? I18N.online : I18N.offline}</span></div>
