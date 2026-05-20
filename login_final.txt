@@ -1,0 +1,11 @@
+HTTP/1.1 302 Found
+X-Powered-By: Express
+Location: /admin/olts
+Vary: Accept
+Content-Type: text/plain; charset=utf-8
+Content-Length: 33
+Set-Cookie: connect.sid=s%3AtXVs1_z3Vf5s5POembTV3KOIcx-WvNp3.0LxERQJz%2B8sOboHfw2eVBJ4dxuUM5QRpRK4SEkPC%2FKU; Path=/; Expires=Thu, 21 May 2026 17:12:50 GMT; HttpOnly; SameSite=Lax
+Date: Wed, 20 May 2026 17:12:50 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
