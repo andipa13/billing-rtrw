@@ -299,3 +299,29 @@
 2026-05-21 02:25:27 info: [Login] Pelanggan ditemukan di DB (customerId=9).
 2026-05-21 02:25:27 warn: [Login] Login dilanjutkan tanpa data ONU (device tidak ditemukan).
 2026-05-21 02:25:27 info: [Login] Login direct berhasil.
+2026-05-21 02:27:55 info: [Login] Pelanggan ditemukan di DB (customerId=38).
+2026-05-21 02:27:55 info: [Login] Perangkat terdeteksi di GenieACS (matched).
+2026-05-21 02:27:55 info: [Login] Login direct berhasil.
+2026-05-21 02:28:18 info: [RXPower] Memulai pemantauan RXPower dengan threshold -27 dBm
+2026-05-21 02:28:18 info: [RXPower] Memeriksa RXPower untuk 118 perangkat...
+2026-05-21 02:28:18 info: [RXPower] Perangkat redaman tinggi: 3BD145-F609-RTEGC63BD145, RXPower: -30.96 dBm, PPPoE: herobungaya
+2026-05-21 02:28:18 info: [RXPower] Perangkat redaman tinggi: 3CF652-F663NV9-ZTEGCD171D3C, RXPower: -31.54 dBm, PPPoE: hpaga
+2026-05-21 02:28:18 info: [RXPower] Pesan peringatan dibuat untuk 2 perangkat
+2026-05-21 02:30:28 info: [MikroTik] Changing profile for antitabara: 5M -> 5-M
+2026-05-21 02:30:28 error: Error setting PPPoE profile for antitabara: input does not match any value of profile
+2026-05-21 02:35:26 info: [MikroTik] Profile for indra is already ISOLIR-1-SEGMEN. Skipping update and kick.
+2026-05-21 02:37:47 info: [MikroTik] Changing profile for krasli: 5M -> ISOLIR-1-SEGMEN
+2026-05-21 02:37:47 info: [MikroTik] Kicking 1 active session(s) for user: krasli
+2026-05-21 02:40:06 info: [MikroTik] Profile for agus is already ISOLIR-1-SEGMEN. Skipping update and kick.
+2026-05-21 02:41:12 info: [MikroTik] Changing profile for hasan: 5M -> ISOLIR-1-SEGMEN
+2026-05-21 02:41:12 info: [MikroTik] Kicking 1 active session(s) for user: hasan
+2026-05-21 02:49:28 info: [MikroTik] Changing profile for suka: 5M -> 5Mbps
+2026-05-21 02:49:28 error: Error setting PPPoE profile for suka: input does not match any value of profile
+2026-05-21 02:50:07 info: [MikroTik] Changing profile for sapri: 5M -> 5Mbps
+2026-05-21 02:50:07 error: Error setting PPPoE profile for sapri: input does not match any value of profile
+2026-05-21 02:52:30 info: [MikroTik] Profile for agus is already ISOLIR-1-SEGMEN. Skipping update and kick.
+2026-05-21 02:52:51 info: [MikroTik] Changing profile for rajo: 5M -> 5Mbps
+2026-05-21 02:52:51 error: Error setting PPPoE profile for rajo: input does not match any value of profile
+2026-05-21 02:53:11 info: [MikroTik] Changing profile for alam: 5M -> 5Mbps
+2026-05-21 02:53:11 error: Error setting PPPoE profile for alam: input does not match any value of profile
+2026-05-21 03:00:00 info: [CRON] Mengecek FUP Pelanggan...

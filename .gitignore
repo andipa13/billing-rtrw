@@ -1,0 +1,8 @@
+# .gitignore
+node_modules/
+*.test.js
+*.test.ts
+database/*.db-shm
+database/*.db-wal
+logs/
+.DS_Store
