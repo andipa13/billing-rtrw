@@ -390,10 +390,16 @@ function getInvoicesByAny(val) {
   const raw = String(val || '').trim();
   const cleanVal = raw.replace(/\D/g, '');
   
-  // Find customer ID first using phone, pppoe, or genieacs_tag
+  // Find customer ID first using phone, pppoe, genieacs_tag, or numeric ID
   let customer = null;
   
-  if (cleanVal.length >= 8) {
+  // Try numeric ID first (if raw is purely numeric and short)
+  if (/^\d+$/.test(raw) && raw.length < 12) {
+    const byId = db.prepare('SELECT id FROM customers WHERE id = ?').get(parseInt(raw));
+    if (byId) customer = byId;
+  }
+  
+  if (!customer && cleanVal.length >= 8) {
     customer = db.prepare(`SELECT id FROM customers WHERE phone LIKE ?`).get(`%${cleanVal}%`);
   }
   
@@ -514,6 +520,26 @@ function updatePaymentInfo(invoiceId, data) {
   `).run(gateway, order_id, link, reference, payload ? JSON.stringify(payload) : null, expires_at, invoiceId);
 }
 
+function revertPayment(invoiceId) {
+  return db.prepare(`
+    UPDATE invoices SET 
+      status = 'unpaid',
+      paid_at = NULL,
+      paid_by_name = NULL,
+      payment_gateway = NULL,
+      payment_order_id = NULL,
+      payment_link = NULL,
+      payment_reference = NULL,
+      payment_payload = NULL,
+      payment_expires_at = NULL,
+      qris_unique_code = NULL,
+      qris_amount_unique = NULL,
+      qris_assigned_at = NULL,
+      qris_paid_notif_id = NULL
+    WHERE id = ?
+  `).run(invoiceId);
+}
+
 module.exports = {
   getInvoicesByAny,
   getUnpaidInvoicesByCustomerId,
@@ -522,5 +548,6 @@ module.exports = {
   getInvoiceSummary, getMonthlyRevenue,
   getDashboardStats, getRecentPayments, getTopUnpaid,
   getTodayRevenue,
-  updatePaymentInfo
+  updatePaymentInfo,
+  revertPayment
 };

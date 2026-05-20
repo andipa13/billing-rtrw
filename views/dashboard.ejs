@@ -563,6 +563,9 @@
                     <%= t('customer.dashboard.hello', 'Halo') %>, <span class="fw-bold">
                       <%= profile ? profile.name : customer.phone %>
                     </span>
+                    <% if (profile) { %>
+                      <span style="font-size:12px;color:rgba(148,163,184,0.8);margin-left:8px;">ID: #<%= profile.id %></span>
+                    <% } %>
                   </h5>
                   <% if (profile) { %>
                     <span class="badge <%= profile.status === 'active' ? 'bg-success' : 'bg-danger' %>">

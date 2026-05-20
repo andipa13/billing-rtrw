@@ -711,13 +711,15 @@ router.get('/dashboard', async (req, res) => {
   }
   
   const invoices = billingSvc.getInvoicesByAny(searchToken);
+  const numericLogin = /^\d+$/.test(String(loginId)) ? parseInt(loginId) : null;
   const profile = customerSvc.getAllCustomers().find(c => {
     const cleanLogin = loginId.replace(/\D/g, '');
     const cleanDb = (c.phone || '').replace(/\D/g, '');
     return cleanDb === cleanLogin || 
            c.phone === loginId || 
            c.genieacs_tag === loginId || 
-           c.pppoe_username === (deviceData ? deviceData.pppoeUsername : null);
+           c.pppoe_username === (deviceData ? deviceData.pppoeUsername : null) ||
+           (numericLogin && c.id === numericLogin);
   });
   
   // Ambil tiket keluhan pelanggan
@@ -773,9 +775,10 @@ router.get('/api/pppoe-traffic', async (req, res) => {
 
   if (!username || !routerId) {
     const cleanLogin = String(loginId).replace(/\D/g, '');
+    const numericLogin = /^\d+$/.test(String(loginId)) ? parseInt(loginId) : null;
     const profile = customerSvc.getAllCustomers().find(c => {
       const cleanDb = String(c.phone || '').replace(/\D/g, '');
-      return cleanDb === cleanLogin || c.phone === loginId || c.genieacs_tag === loginId || c.pppoe_username === loginId;
+      return cleanDb === cleanLogin || c.phone === loginId || c.genieacs_tag === loginId || c.pppoe_username === loginId || (numericLogin && c.id === numericLogin);
     }) || null;
 
     if (!routerId && profile && profile.router_id) {
@@ -997,10 +1000,11 @@ router.post('/change-tag', async (req, res) => {
     notif = dashboardNotif('ID/Tag berhasil diubah.', 'success');
     
     // UPDATE DATABASE SQLITE IF MATCHING PROFILE FOUND
+    const numericOldTag = /^\d+$/.test(String(oldTag)) ? parseInt(oldTag) : null;
     const profileToUpdate = customerSvc.getAllCustomers().find(c => {
       const cleanLogin = oldTag.replace(/\D/g, '');
       const cleanDb = (c.phone || '').replace(/\D/g, '');
-      return cleanDb === cleanLogin || c.phone === oldTag || c.genieacs_tag === oldTag;
+      return cleanDb === cleanLogin || c.phone === oldTag || c.genieacs_tag === oldTag || (numericOldTag && c.id === numericOldTag);
     });
     
     if (profileToUpdate) {
@@ -1023,10 +1027,11 @@ router.post('/change-tag', async (req, res) => {
     searchToken = deviceData.pppoeUsername;
   }
   const invoices = billingSvc.getInvoicesByAny(searchToken);
+  const numericResolved = /^\d+$/.test(String(resolvedPhone)) ? parseInt(resolvedPhone) : null;
   const profile = customerSvc.getAllCustomers().find(c => {
     const cleanLogin = resolvedPhone.replace(/\D/g, '');
     const cleanDb = (c.phone || '').replace(/\D/g, '');
-    return cleanDb === cleanLogin || c.phone === resolvedPhone || c.pppoe_username === (deviceData ? deviceData.pppoeUsername : null);
+    return cleanDb === cleanLogin || c.phone === resolvedPhone || c.pppoe_username === (deviceData ? deviceData.pppoeUsername : null) || (numericResolved && c.id === numericResolved);
   });
   const tickets = profile ? ticketSvc.getTicketsByCustomerId(profile.id) : [];
 

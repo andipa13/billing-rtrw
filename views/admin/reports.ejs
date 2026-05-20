@@ -23,6 +23,9 @@
     </div>
   </div>
   <div class="page">
+    <% if (typeof msg !== 'undefined' && msg) { %>
+      <div class="alert alert-<%= msg.type==='success'?'s':'d' %>"><%= msg.text %></div>
+    <% } %>
 
     <!-- Big Stats -->
     <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
@@ -151,13 +154,14 @@
               <th class="num"><%= t('admin.reports.table.amount', 'Jumlah') %></th>
               <th><%= t('admin.reports.table.recorded_by', 'Dicatat Oleh') %></th>
               <th><%= t('admin.reports.table.time', 'Waktu') %></th>
+              <th style="width:1px"></th>
             </tr>
           </thead>
           <tbody>
           <% const mn2 = (lang === 'en')
             ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
             : ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des']; %>
-          <% if(recentPayments.length===0){%><tr><td colspan="5" class="text-center text-muted" style="padding:24px"><%= t('admin.reports.no_payments', 'Belum ada pembayaran') %></td></tr><%}%>
+          <% if(recentPayments.length===0){%><tr><td colspan="6" class="text-center text-muted" style="padding:24px"><%= t('admin.reports.no_payments', 'Belum ada pembayaran') %></td></tr><%}%>
           <% recentPayments.forEach(p=>{ %>
             <tr>
               <td class="fw6"><%= p.customer_name %></td>
@@ -165,6 +169,11 @@
               <td class="num fw6" style="color:var(--success)">Rp <%= p.amount.toLocaleString('id-ID') %></td>
               <td style="font-size:12px"><%= p.paid_by_name||'-' %></td>
               <td style="font-size:11px;color:var(--muted)"><%= p.paid_at ? new Date(p.paid_at).toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '-' %></td>
+              <td>
+                <form method="POST" action="/admin/reports/payment/<%= p.id %>/revert" onsubmit="return confirm('Batalkan pembayaran ini? Status tagihan akan kembali ke BELUM BAYAR.')">
+                  <button class="btn btn-d btn-sm" type="submit" title="Batalkan pembayaran"><i class="bi bi-trash3"></i></button>
+                </form>
+              </td>
             </tr>
           <% }) %>
           </tbody>

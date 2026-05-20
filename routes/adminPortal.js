@@ -1606,8 +1606,26 @@ router.get('/reports', requireAdminSession, (req, res) => {
     agentDepositYear,
     agentDepositThisMonth,
     cashInYear,
-    cashInThisMonth
+    cashInThisMonth,
+    msg: flashMsg(req)
   });
+});
+
+router.post('/reports/payment/:id/revert', requireAdminSession, restrictToAdmin, (req, res) => {
+  try {
+    const invoice = billingSvc.getInvoiceById(req.params.id);
+    if (!invoice) {
+      req.session._msg = { type: 'error', text: 'Tagihan tidak ditemukan.' };
+    } else if (invoice.status !== 'paid') {
+      req.session._msg = { type: 'error', text: 'Tagihan belum dibayar, tidak perlu dibatalkan.' };
+    } else {
+      billingSvc.revertPayment(req.params.id);
+      req.session._msg = { type: 'success', text: `Pembayaran tagihan #${req.params.id} berhasil dibatalkan. Status kembali ke BELUM BAYAR.` };
+    }
+  } catch (e) {
+    req.session._msg = { type: 'error', text: 'Gagal membatalkan pembayaran: ' + e.message };
+  }
+  res.redirect('back');
 });
 
 // ─── SETTINGS ──────────────────────────────────────────────────────────────
