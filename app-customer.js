@@ -298,6 +298,7 @@ app.get('/admin/manifest.webmanifest', (req, res) => {
   });
 });
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/receipts', express.static(path.join(__dirname, 'receipts')));
 // Mount customer portal
 const customerPortal = require('./routes/customerPortal');
 app.use('/customer', customerPortal);
@@ -317,6 +318,10 @@ app.use('/agent', agentPortal);
 // Fungsi untuk memulai server dengan penanganan port yang sudah digunakan
 function startServer(portToUse) {
     logger.info(`Mencoba memulai server pada port ${portToUse}...`);
+
+    // Start WA Queue worker for retry failed PDF sends
+    const { startWorker } = require('./services/waQueueService');
+    startWorker(60000); // Check every 60 seconds
     
     // Coba port alternatif jika port utama tidak tersedia
     try {

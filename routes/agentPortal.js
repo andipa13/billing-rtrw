@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const { getSetting } = require('../config/settingsManager');
+const { logger } = require('../config/logger');
 const agentSvc = require('../services/agentService');
 const billingSvc = require('../services/billingService');
 const customerSvc = require('../services/customerService');
@@ -130,6 +133,30 @@ router.post('/pay-invoice', requireAgentSession, express.urlencoded({ extended: 
     };
 
     req.session._msg = { type: 'success', text: 'Pembayaran berhasil diproses.' };
+
+    // Kirim PDF bukti pelunasan via Evolution API
+    if (customer && customer.phone) {
+      try {
+        const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${invoiceId}.pdf`);
+        const receiptPdf = require('../services/receiptPdfService');
+        logger.info(`[Pay-Agent] Generating PDF at ${pdfPath}`);
+        await receiptPdf.generateReceipt(invoiceId, pdfPath);
+        if (fs.existsSync(pdfPath)) {
+          const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
+          const caption = `Yth. ${customer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
+          const waResult = await sendWhatsAppMedia(customer.phone, pdfPath, caption);
+          if (waResult.success) {
+            logger.info(`[Pay-Agent] PDF receipt sent to ${customer.phone} (invoice ${invoiceId})`);
+          } else {
+            logger.error(`[Pay-Agent] PDF receipt FAILED: ${waResult.error}`);
+            const { enqueue } = require('../services/waQueueService');
+            enqueue(customer.phone, pdfPath, caption);
+          }
+        }
+      } catch (e2) {
+        logger.error(`[Pay-Agent] Failed to send PDF: ${e2.message}`);
+      }
+    }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
   }

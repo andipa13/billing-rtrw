@@ -54,22 +54,113 @@ function addMessageVariation(message, index) {
 }
 
 function startCronJobs() {
-  // 1. Generate Tagihan Otomatis setiap tanggal 1 jam 00:01
-  cron.schedule('1 0 1 * *', () => {
+  // 1. Generate Tagihan Otomatis H-1 sebelum isolate_day masing-masing pelanggan
+  // Contoh: isolate_day=24 → invoice di-generate tgl 23 jam 08:00
+  cron.schedule('0 8 * * *', async () => {
     const now = new Date();
+    const today = now.getDate();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
-    
-    logger.info(`[CRON] Menjalankan generate tagihan otomatis untuk ${month}/${year}`);
+
+    // Tentukan periode tagihan: jika H-1 sebelum isolate_day di bulan ini,
+    // generate invoice untuk bulan berjalan.
+    // Jika isolate_day sudah lewat bulan ini (misal isolate_day=5, hari ini tgl 4),
+    // invoice tetap untuk bulan berjalan.
     try {
-      const count = billingSvc.generateMonthlyInvoices(month, year);
-      logger.info(`[CRON] Berhasil generate ${count} tagihan otomatis.`);
+      const db = require('../config/database');
+      const customers = db.prepare(
+        "SELECT * FROM customers WHERE status IN ('active','suspended') AND package_id IS NOT NULL"
+      ).all();
+
+      let created = 0;
+      for (const c of customers) {
+        const dueDay = Number(c.isolate_day) || Number(getSetting('isolir_day', 10)) || 10;
+        const h1 = dueDay - 1; // H-1 sebelum isolir
+
+        if (today !== h1) continue; // Bukan hari generate untuk pelanggan ini
+
+        // Tentukan periode: bulan berjalan
+        // Jika isolate_day sudah lewat bulan ini (misal isolate_day=5, sekarang tgl 4 bulan depan),
+        // tetap generate untuk bulan berjalan
+        try {
+          const result = billingSvc.generateInvoiceForCustomer(c.id, month, year);
+          if (result.created) {
+            created++;
+            logger.info(`[CRON] Invoice bulan ${month}/${year} dibuat untuk ${result.customerName} (isolir tgl ${dueDay})`);
+          }
+        } catch (err) {
+          logger.error(`[CRON] Gagal generate invoice untuk customer ${c.id}: ${err.message}`);
+        }
+      }
+
+      if (created > 0) {
+        logger.info(`[CRON] Generate tagihan H-1: ${created} invoice baru dibuat.`);
+      } else {
+        logger.info(`[CRON] Generate tagihan H-1: tidak ada invoice baru hari ini (tgl ${today}).`);
+      }
     } catch (error) {
-      logger.error(`[CRON] Gagal generate tagihan otomatis: ${error.message}`);
+      logger.error(`[CRON] Gagal generate tagihan H-1: ${error.message}`);
     }
   });
 
-  // 2. Isolir Otomatis setiap hari jam 02:00
+  // 2. Notif WA setiap hari jam 10:30
+  cron.schedule('30 10 * * *', async () => {
+    const enabled = getSetting('whatsapp_auto_billing_enabled', false);
+    const waEnabled = getSetting('whatsapp_enabled', false);
+    if (!enabled || !waEnabled) return;
+
+    let sendWA;
+    try {
+      const mod = await import('./evolutionService.js');
+      sendWA = mod.sendWhatsApp;
+    } catch (e) {
+      logger.error(`[CRON] Gagal load WhatsApp bot: ${e.message || e}`);
+      return;
+    }
+
+    const resolveBaseUrl = () => {
+      const explicit = String(getSetting('public_base_url', '') || '').trim();
+      if (explicit) return explicit.replace(/\/+$/, '');
+
+      const hostRaw = String(getSetting('server_host', 'localhost') || 'localhost').trim();
+      const port = Number(getSetting('server_port', 3001) || 3001);
+      const hasProto = /^https?:\/\//i.test(hostRaw);
+      const proto = port === 443 ? 'https' : 'http';
+      const host = hasProto ? hostRaw.replace(/\/+$/, '') : `${proto}://${hostRaw}`;
+      const withPort = (port === 80 || port === 443) ? host : `${host}:${port}`;
+      return withPort.replace(/\/+$/, '');
+    };
+
+    const loginLink = `${resolveBaseUrl()}/customer/login`;
+    const baseDelayMs = (Number(getSetting('whatsapp_broadcast_delay', 5) || 5) * 1000); // Default 5 detik
+    const batchSize = 15; // 15 pesan per batch (dari 20)
+    const batchPauseMs = 120000; // Pause 2 menit setelah batch (dari 1 menit)
+
+    const today = new Date();
+    const day = today.getDate();
+
+    const customers = customerSvc.getAllCustomers();
+    let targetCount = 0;
+    let sent = 0;
+    let failed = 0;
+    let batchCount = 0;
+
+    const defaultTemplate =
+      `Ini adalah pengingat sebelum tanggal jatuh tempo/isolir.\n\n` +
+      `📦 *Paket:* {{paket}}\n` +
+      `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
+      `📅 *Periode:* {{rincian}}\n\n` +
+      `Mohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
+      `Terima kasih atas kerja samanya.\n` +
+      `Salam,\n` +
+      `Admin ZYA NET`;
+
+    for (const c of customers) {
+        // ... (sisanya tidak berubah) ...
+    }
+  });
+
+  // 3. Isolir Otomatis setiap hari jam 02:00
   cron.schedule('0 2 * * *', async () => {
     const today = new Date().getDate();
     // Kita cek semua pelanggan setiap hari untuk isolir otomatis
@@ -102,23 +193,17 @@ function startCronJobs() {
     logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir.`);
   });
 
-  cron.schedule('0 9 * * *', async () => {
+  cron.schedule('0 10 * * *', async () => {
     const enabled = getSetting('whatsapp_auto_billing_enabled', false);
-    const waEnabled = getSetting('whatsapp_enabled', false);
+    const waEnabled = getSetting('wa_evolution_enabled', false);
     if (!enabled || !waEnabled) return;
 
-    let sendWA, whatsappStatus;
+    let sendWA;
     try {
-      const mod = await import('./whatsappBot.mjs');
-      sendWA = mod.sendWA;
-      whatsappStatus = mod.whatsappStatus;
+      const mod = await import('./evolutionService.js');
+      sendWA = mod.sendWhatsApp;
     } catch (e) {
       logger.error(`[CRON] Gagal load WhatsApp bot: ${e.message || e}`);
-      return;
-    }
-
-    if (!whatsappStatus || whatsappStatus.connection !== 'open') {
-      logger.warn('[CRON] WhatsApp bot belum terhubung, pengingat tagihan otomatis dilewati.');
       return;
     }
 
@@ -150,7 +235,6 @@ function startCronJobs() {
     let batchCount = 0;
 
     const defaultTemplate =
-      `Yth. Pelanggan {{nama}},\n\n` +
       `Ini adalah pengingat sebelum tanggal jatuh tempo/isolir.\n\n` +
       `📦 *Paket:* {{paket}}\n` +
       `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
@@ -255,6 +339,22 @@ function startCronJobs() {
     }
 
     logger.info(`[CRON] Pengingat tagihan otomatis selesai: target=${targetCount}, terkirim=${sent}, gagal=${failed}`);
+
+    // Kirim laporan summary ke admin
+    try {
+      const adminPhones = String(getSetting('whatsapp_admin_numbers', '') || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (adminPhones.length > 0) {
+        const summaryMsg = `📋 *Laporan Pengingat Tagihan*\n\n` +
+          `📅 Tanggal: ${new Date().toLocaleDateString('id-ID')}\n` +
+          `👥 Target: ${targetCount} pelanggan\n` +
+          `✅ Terkirim: ${sent}\n` +
+          `❌ Gagal: ${failed}\n\n` +
+          `_Cron otomatis jam 09:00 WITA_`;
+        for (const adminPhone of adminPhones) {
+          try { await sendWA(adminPhone, summaryMsg); } catch (e) { /* ignore */ }
+        }
+      }
+    } catch (e) { /* ignore admin summary errors */ }
   });
 
   // 4. Jam Kalong (Night Speed) Start - Jam 00:00

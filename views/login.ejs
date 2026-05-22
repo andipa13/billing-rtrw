@@ -228,15 +228,15 @@
       <div class="form-container">
         <form method="POST" action="/customer/login">
           <div class="form-floating">
-            <input type="text" class="form-control" id="phone" name="phone" placeholder="<%= t('customer.id_tag_placeholder', 'Masukkan ID/Tag Pelanggan') %>"
+            <input type="text" class="form-control" id="phone" name="phone" placeholder="<%= t('customer.id_login_placeholder', 'Masukkan 5 Angka ID Login') %>"
               required autofocus>
             <label for="phone">
-              <i class="bi bi-person-badge me-2"></i><%= t('customer.id_tag', 'ID/Tag Pelanggan') %>
+              <i class="bi bi-person-badge me-2"></i><%= t('customer.id_login', 'ID Login (5 Angka)') %>
             </label>
           </div>
           <div class="text-center mb-3 small" style="color: rgba(148, 163, 184, 0.95);">
             <i class="bi bi-info-circle me-1"></i>
-            Masukkan ID Pelanggan (Contoh: 12345678)
+            Masukkan ID Login 5 Angka Anda (Contoh: 48291)
           </div>
           <% if (settings.login_otp_enabled) { %>
             <div class="text-center mb-3 small" style="color: rgba(148, 163, 184, 0.95);">
@@ -258,7 +258,7 @@
         <% if (error) { %>
           <div class="alert alert-danger mt-3 text-center">
             <i class="bi bi-exclamation-triangle me-2"></i>
-            <%= error==='Nomor HP tidak valid atau belum terdaftar.' ? 'ID/Tag tidak valid atau belum terdaftar.' :
+            <%= error==='Nomor HP tidak valid atau belum terdaftar.' ? 'ID Login 5 angka tidak valid atau belum terdaftar.' :
               error %>
           </div>
         <% } %>

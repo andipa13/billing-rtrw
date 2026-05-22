@@ -2,7 +2,36 @@
 node_modules/
 *.test.js
 *.test.ts
+
+# Database files
+database/*.db
 database/*.db-shm
 database/*.db-wal
+wa_queue.db
+
+# Logs
 logs/
+
+# Auth session Baileys (sensitive)
+auth_info_baileys/
+
+# Backups
+backups/
+
+# Temp & test files
+tmp/
+receipts/
+public/receipts/
+test-*.js
+test_*.js
+send_*.js
+invoice_test.html
+public/invoice_template.html
+public/temp_invoice.html
+check_reminder.js
+convert_customer_codes.js
+send_preview.js
+
+# Misc
 .DS_Store
+settings.json

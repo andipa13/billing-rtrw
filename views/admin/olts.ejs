@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang || 'id' %>">
+<html lang="<%= lang || 'id' %>" data-theme="light">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><%= t('admin.nav.olt_management', 'Manajemen OLT') %> | <%= company %></title>
@@ -196,6 +196,9 @@
       <span><%= t('admin.nav.olt_management', 'Manajemen OLT') %></span>
     </div>
     <div class="tb-right">
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light">
+        <i class="bi bi-moon-fill" id="themeIcon"></i>
+      </button>
       <div class="d-flex gap-2">
         <button class="btn btn-g btn-sm" onclick="openModal('manageOltsModal')"><i class="bi bi-gear"></i> <%= t('admin.olts.manage', 'Kelola OLT') %></button>
         <button class="btn btn-p btn-sm" onclick="openModal('addOltModal')"><i class="bi bi-plus-lg"></i> <%= t('admin.olts.add', 'Tambah OLT') %></button>

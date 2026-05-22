@@ -3,6 +3,44 @@
  */
 const db = require('../config/database');
 const auditTrail = require('./auditTrailService');
+const { generateReceipt } = require('./receiptPdfService');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { getSettingsWithCache } = require('../config/settingsManager');
+
+function sendPdfToWA(invoiceId, filePath) {
+  const settings = getSettingsWithCache();
+  if (!settings.wa_evolution_enabled) return;
+  
+  const url = `${settings.wa_evolution_url}/message/sendMedia/${settings.wa_evolution_instance}`;
+  const apikey = settings.wa_evolution_api_key;
+  
+  const invoice = db.prepare('SELECT c.phone FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?').get(invoiceId);
+  if (!invoice || !invoice.phone) return;
+  
+  const publicPath = '/root/ali-jaya-billing/public/receipts/' + path.basename(filePath);
+  if (!fs.existsSync('/root/ali-jaya-billing/public/receipts')) fs.mkdirSync('/root/ali-jaya-billing/public/receipts', { recursive: true });
+  fs.copyFileSync(filePath, publicPath);
+  
+  const fileUrl = `http://${settings.server_host}:${settings.server_port}/receipts/${path.basename(filePath)}`;
+  
+  const phone = invoice.phone.startsWith('62') ? invoice.phone : '62' + invoice.phone.replace(/^0/, '');
+  const fileName = path.basename(filePath);
+
+  axios.post(url, {
+    number: phone,
+    mediatype: 'document',
+    mimetype: 'application/pdf',
+    caption: `Bukti Pembayaran Invoice #${invoiceId} - ZyaNet`,
+    media: fileUrl,
+    fileName: fileName
+  }, { headers: { apikey } }).then(res => {
+    console.log(`[WA] PDF receipt invoice #${invoiceId} terkirim ke ${phone}`);
+  }).catch(err => {
+    console.error(`[WA] Gagal kirim PDF invoice #${invoiceId}:`, err.response?.data || err.message);
+  });
+}
 
 function daysInMonth(year, month1to12) {
   return new Date(year, month1to12, 0).getDate();
@@ -123,6 +161,25 @@ function generateInvoiceForCustomer(customerId, month, year) {
   return { created: true, invoiceId: r.lastInsertRowid, customerName: customer.name };
 }
 
+/**
+ * Otomatis geser isolate_day berdasarkan tanggal pembayaran.
+ * Rule:
+ *   - Bayar TELAT (tanggal bayar > isolate_day) → isolate_day bulan depan = tanggal bayar
+ *   - Bayar TEPAT atau LEBIH AWAL (tanggal bayar <= isolate_day) → isolate_day tetap
+ */
+function autoShiftIsolateDay(customerId) {
+  const row = db.prepare('SELECT isolate_day FROM customers WHERE id=?').get(customerId);
+  if (!row) return;
+  const now = new Date();
+  const currentDue = Number(row.isolate_day) || 10;
+  const today = now.getDate();
+  if (today > currentDue) {
+    // Bayar telat → geser isolate_day ke tanggal bayar
+    db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(today, customerId);
+  }
+  // Bayar tepat/lebih awal → tidak ada perubahan
+}
+
 function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes) {
   const cid = Number(customerId);
   const m = Number(month);
@@ -141,6 +198,7 @@ function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes)
 
   const ensure = generateInvoiceForCustomer(cid, m, y);
   markAsPaid(ensure.invoiceId, paidByName, notes);
+  autoShiftIsolateDay(cid);
   return { created: ensure.created, paid: true, alreadyPaid: false, invoiceId: ensure.invoiceId, customerName: ensure.customerName };
 }
 
@@ -191,7 +249,7 @@ function payInvoicesForCustomerMonths(customerId, year, months, paidByName, note
     }
   });
   run();
-
+  autoShiftIsolateDay(cid);
   return summary;
 }
 
@@ -239,7 +297,7 @@ function getCustomerBillingYearSummary(customerId, year) {
   };
 }
 
-function getAllInvoices({ month, year, status, search, limit = 300 } = {}) {
+function getAllInvoices({ month, year, status = 'unpaid', search, limit = 300 } = {}) {
   let q = `
     SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.genieacs_tag, p.name as package_name
     FROM invoices i
@@ -276,10 +334,22 @@ function markAsPaid(invoiceId, paidByName, notes, actor = null) {
     UPDATE invoices SET status='paid', paid_at=CURRENT_TIMESTAMP, paid_by_name=?, notes=? WHERE id=?
   `).run(paidByName || 'Admin', notes || '', invoiceId);
 
+  // Auto-shift due date jika bayar telat
+  if (result.changes > 0) {
+    const invRow = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(invoiceId);
+    if (invRow) autoShiftIsolateDay(invRow.customer_id);
+  }
+
   // Catat audit trail jika berhasil
   if (result.changes > 0 && actor) {
     const invoice = db.prepare('SELECT id, customer_id, period_month, period_year, amount FROM invoices WHERE id=?').get(invoiceId);
     if (invoice) {
+      // Generate & Send PDF
+      const pdfPath = `/tmp/invoice_${invoiceId}.pdf`;
+      generateReceipt(invoiceId, pdfPath).then(() => {
+        sendPdfToWA(invoiceId, pdfPath);
+      });
+
       auditTrail.logAuditTrail({
         action: 'MARK_INVOICE_PAID',
         entity_type: 'invoice',
@@ -333,10 +403,31 @@ function deleteInvoice(id, actor = null) {
   return result;
 }
 
-function getInvoiceSummary(month, year) {
-  const total  = db.prepare('SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=?').get(month, year);
-  const paid   = db.prepare("SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=? AND status='paid'").get(month, year);
-  const unpaid = db.prepare("SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=? AND status='unpaid'").get(month, year);
+function getInvoiceSummary(month, year, status = 'all') {
+  // Total query with optional status filter
+  let totalQ = `SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=?`;
+  let totalParams = [month, year];
+  if (status && status !== 'all') {
+    totalQ += ' AND status=?';
+    totalParams.push(status);
+  }
+  const total = db.prepare(totalQ).get(...totalParams);
+
+  // Determine paid and unpaid based on status
+  let paid, unpaid;
+
+  if (status === 'paid') {
+    paid = total;
+    unpaid = { count: 0, total: 0 };
+  } else if (status === 'unpaid') {
+    unpaid = total;
+    paid = { count: 0, total: 0 };
+  } else {
+    // Original: all statuses
+    paid = db.prepare("SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=? AND status='paid'").get(month, year);
+    unpaid = db.prepare("SELECT COUNT(*) as count, SUM(amount) as total FROM invoices WHERE period_month=? AND period_year=? AND status='unpaid'").get(month, year);
+  }
+
   return { total, paid, unpaid };
 }
 
@@ -374,6 +465,14 @@ function getRecentPayments(limit = 8) {
     JOIN customers c ON i.customer_id = c.id
     WHERE i.status='paid' ORDER BY i.paid_at DESC LIMIT ?
   `).all(limit);
+}
+
+function getAllPaidInvoices() {
+  return db.prepare(`
+    SELECT i.*, c.name as customer_name FROM invoices i
+    JOIN customers c ON i.customer_id = c.id
+    WHERE i.status='paid' ORDER BY i.paid_at DESC
+  `).all();
 }
 
 function getTopUnpaid(limit = 5) {
@@ -546,7 +645,7 @@ module.exports = {
   generateMonthlyInvoices, generateInvoiceForCustomer, createInstallProrataCatchUpInvoice, payInvoiceForCustomerPeriod, payInvoicesForCustomerMonths, getPaidMonthsForCustomerYear, getCustomerBillingYearSummary, getAllInvoices, getInvoiceById,
   markAsPaid, markAsUnpaid, deleteInvoice,
   getInvoiceSummary, getMonthlyRevenue,
-  getDashboardStats, getRecentPayments, getTopUnpaid,
+  getDashboardStats, getRecentPayments, getTopUnpaid, getAllPaidInvoices,
   getTodayRevenue,
   updatePaymentInfo,
   revertPayment

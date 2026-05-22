@@ -4,10 +4,14 @@
 const db = require('../config/database');
 
 // ─── CUSTOMERS ───────────────────────────────────────────────
-function getAllCustomers(search = '') {
+function getAllCustomers(search = '', sort = 'name', dir = 'asc') {
   const now = new Date();
   const month = now.getMonth() + 1;
   const year = now.getFullYear();
+
+  const allowedCols = { name: 'c.name', id: 'c.id', phone: 'c.phone', package_name: 'p.name', address: 'c.address', status: 'c.status', install_date: 'c.install_date', unpaid_count: 'unpaid_count', customer_code: 'c.customer_code', isolate_day: 'c.isolate_day' };
+  const col = allowedCols[sort] || allowedCols.name;
+  const direction = (dir === 'desc') ? 'DESC' : 'ASC';
 
   const base = `
     SELECT c.*, p.name as package_name, p.price as package_price,
@@ -26,11 +30,12 @@ function getAllCustomers(search = '') {
     LEFT JOIN odps odp ON c.odp_id = odp.id
     LEFT JOIN customer_usage u ON u.customer_id = c.id AND u.period_month = ${month} AND u.period_year = ${year}
   `;
+  const order = ` ORDER BY ${col} ${direction}`;
   if (search) {
     const s = `%${search}%`;
-    return db.prepare(base + ` WHERE c.name LIKE ? OR c.phone LIKE ? OR c.genieacs_tag LIKE ? OR c.address LIKE ? ORDER BY c.name ASC`).all(s, s, s, s);
+    return db.prepare(base + ` WHERE c.name LIKE ? OR c.phone LIKE ? OR c.genieacs_tag LIKE ? OR c.address LIKE ?` + order).all(s, s, s, s);
   }
-  return db.prepare(base + ` ORDER BY c.name ASC`).all();
+  return db.prepare(base + order).all();
 }
 
 function resetPromoCyclesUsed(customerId) {
@@ -54,12 +59,62 @@ function getCustomerById(id) {
   `).get(id);
 }
 
+function normalizePhone(input) {
+  if (!input) return '';
+  const digits = String(input).replace(/\D/g, '');
+  if (digits.length < 8) return '';
+  if (digits.startsWith('0')) return '62' + digits.slice(1);
+  if (digits.startsWith('62')) return digits;
+  if (digits.startsWith('60')) return digits; // Malaysia
+  if (digits.startsWith('65')) return digits; // Singapore
+  if (digits.startsWith('8') && digits.length >= 10 && digits.length <= 12) return '62' + digits;
+  return digits;
+}
+
+function formatPhone(phone) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return '-';
+  
+  // Pengecualian untuk nomor Malaysia (dimulai dengan 60)
+  if (normalized.startsWith('60')) {
+    const parts = [];
+    let i = 0;
+    while (i < normalized.length) {
+      parts.push(normalized.slice(i, i + 3));
+      i += 3;
+    }
+    return parts.join(' ');
+  }
+
+  // Format standar Indonesia: 62 822 349 24646
+  const without62 = normalized.startsWith('62') ? normalized.slice(2) : normalized;
+  const parts = [];
+  let i = 0;
+  while (i < without62.length) {
+    parts.push(without62.slice(i, i + 3));
+    i += 3;
+  }
+  return '62 ' + parts.join(' ');
+}
+
+function generateCustomerCode() {
+  let code;
+  let exists;
+  do {
+    code = Math.floor(10000 + Math.random() * 90000).toString();
+    exists = db.prepare('SELECT 1 FROM customers WHERE customer_code = ?').get(code);
+  } while (exists);
+  return code;
+}
+
 function createCustomer(data) {
+  const phone = normalizePhone(data.phone);
+  const customerCode = data.customer_code || generateCustomerCode();
   return db.prepare(`
-    INSERT INTO customers (name, phone, email, address, package_id, router_id, olt_id, odp_id, pon_port, lat, lng, genieacs_tag, pppoe_username, isolir_profile, status, install_date, notes, auto_isolate, isolate_day, connection_type, static_ip, mac_address)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO customers (name, phone, email, address, package_id, router_id, olt_id, odp_id, pon_port, lat, lng, genieacs_tag, pppoe_username, isolir_profile, status, install_date, notes, auto_isolate, isolate_day, connection_type, static_ip, mac_address, customer_code)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    data.name, data.phone || '', data.email || '', data.address || '',
+    data.name, phone, data.email || '', data.address || '',
     data.package_id ? parseInt(data.package_id) : null,
     data.router_id ? parseInt(data.router_id) : null,
     data.olt_id ? parseInt(data.olt_id) : null,
@@ -75,7 +130,8 @@ function createCustomer(data) {
     data.isolate_day !== undefined ? parseInt(data.isolate_day) : 10,
     data.connection_type || 'pppoe',
     data.static_ip || '',
-    data.mac_address || ''
+    data.mac_address || '',
+    customerCode
   );
 }
 
@@ -85,7 +141,7 @@ function updateCustomer(id, data) {
   const pkgChanged = prev && Number(prev.package_id || 0) !== Number(newPkgId || 0);
 
   const result = db.prepare(`
-    UPDATE customers SET name=?, phone=?, email=?, address=?, package_id=?, router_id=?, olt_id=?, odp_id=?, pon_port=?, lat=?, lng=?, genieacs_tag=?, pppoe_username=?, isolir_profile=?, status=?, install_date=?, notes=?, auto_isolate=?, isolate_day=?, cable_path=?, connection_type=?, static_ip=?, mac_address=?
+    UPDATE customers SET name=?, phone=?, email=?, address=?, package_id=?, router_id=?, olt_id=?, odp_id=?, pon_port=?, lat=?, lng=?, genieacs_tag=?, pppoe_username=?, isolir_profile=?, status=?, install_date=?, notes=?, auto_isolate=?, isolate_day=?, cable_path=?, connection_type=?, static_ip=?, mac_address=?, customer_code=?
     WHERE id=?
   `).run(
     data.name, data.phone || '', data.email || '', data.address || '',
@@ -106,6 +162,7 @@ function updateCustomer(id, data) {
     data.connection_type || 'pppoe',
     data.static_ip || '',
     data.mac_address || '',
+    data.customer_code || '',
     id
   );
 
@@ -236,11 +293,17 @@ function findCustomerByAny(val) {
     if (p1) return getCustomerById(p1.id);
   }
 
-  // 2. Try GenieACS Tag atau PPPoE Username (Exact Match)
+  // 2. Try Customer Code (5 digit ID login)
+  if (/^\d{5}$/.test(cleanVal)) {
+    const c = db.prepare('SELECT id FROM customers WHERE customer_code = ?').get(cleanVal);
+    if (c) return getCustomerById(c.id);
+  }
+
+  // 3. Try GenieACS Tag atau PPPoE Username (Exact Match)
   const t = db.prepare('SELECT id FROM customers WHERE genieacs_tag = ? OR pppoe_username = ?').get(cleanVal, cleanVal);
   if (t) return getCustomerById(t.id);
 
-  // 3. Try ID if numeric
+  // 4. Try ID if numeric
   if (/^\d+$/.test(cleanVal) && cleanVal.length < 8) {
     const c = getCustomerById(parseInt(cleanVal));
     if (c) return c;
@@ -300,5 +363,5 @@ module.exports = {
   getAllCustomers, getCustomerById, createCustomer, updateCustomer, deleteCustomer, getCustomerStats,
   getAllPackages, getPackageById, createPackage, updatePackage, deletePackage,
   suspendCustomer, activateCustomer, findCustomerByAny, updateCustomerCablePath,
-  resetPromoCyclesUsed
+  resetPromoCyclesUsed, formatPhone
 };

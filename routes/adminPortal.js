@@ -9,6 +9,7 @@ const db = require('../config/database');
 const customerDevice = require('../services/customerDeviceService');
 const customerSvc = require('../services/customerService');
 const billingSvc = require('../services/billingService');
+const receiptPdf = require('../services/receiptPdfService');
 const mikrotikService = require('../services/mikrotikService');
 const adminSvc = require('../services/adminService');
 const agentSvc = require('../services/agentService');
@@ -429,7 +430,8 @@ router.get('/map', requireAdminSession, (req, res) => {
     customers, 
     odps,
     msg: flashMsg(req),
-    settings: getSettings()
+    settings: getSettings(),
+    formatPhone: require('../services/customerService').formatPhone
   });
 });
 
@@ -819,8 +821,8 @@ router.get('/bulk', requireAdminSession, (req, res) => {
 
 // ─── CUSTOMERS ─────────────────────────────────────────────────────────────
 router.get('/customers', requireAdminSession, (req, res) => {
-  const { search = '', status: filterStatus = '' } = req.query;
-  const customers = customerSvc.getAllCustomers(search);
+  const { search = '', status: filterStatus = '', sort = 'name', dir = 'asc' } = req.query;
+  const customers = customerSvc.getAllCustomers(search, sort, dir);
   const stats = customerSvc.getCustomerStats();
   const packages = customerSvc.getAllPackages();
   const routers = mikrotikService.getAllRouters();
@@ -834,8 +836,9 @@ router.get('/customers', requireAdminSession, (req, res) => {
 
   res.render('admin/customers', {
     title: 'Data Pelanggan', company: company(), activePage: 'customers',
-    customers: filteredCustomers, stats, packages, routers, olts, odps, search, filterStatus, msg: flashMsg(req),
-    settings: getSettings()
+    customers: filteredCustomers, stats, packages, routers, olts, odps, search, filterStatus, sort, dir, msg: flashMsg(req),
+    settings: getSettings(),
+    formatPhone: require('../services/customerService').formatPhone
   });
 });
 
@@ -1150,6 +1153,43 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
     if (freshCustomer && freshCustomer.status === 'suspended' && freshCustomer.unpaid_count === 0) {
       await customerSvc.activateCustomer(req.params.id);
     }
+
+    // Kirim PDF bukti pelunasan langsung ke WA pelanggan
+    logger.info(`[Pay] Checking PDF send for customer ${req.params.id}, phone=${freshCustomer ? freshCustomer.phone : 'no-customer'}`);
+    if (freshCustomer && freshCustomer.phone) {
+      try {
+        const lastInv = db.prepare('SELECT id FROM invoices WHERE customer_id = ? ORDER BY paid_at DESC, id DESC LIMIT 1').get(req.params.id);
+        logger.info(`[Pay] Last invoice for ${req.params.id}: ${lastInv ? lastInv.id : 'none'}`);
+        if (lastInv) {
+          const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${lastInv.id}.pdf`);
+          logger.info(`[Pay] Generating PDF at ${pdfPath}`);
+          await receiptPdf.generateReceipt(lastInv.id, pdfPath);
+          logger.info(`[Pay] PDF generated, exists=${fs.existsSync(pdfPath)}`);
+          if (fs.existsSync(pdfPath)) {
+            const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
+            const caption = `Yth. ${freshCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
+            const waResult = await sendWhatsAppMedia(
+              freshCustomer.phone,
+              pdfPath,
+              caption
+            );
+            if (waResult.success) {
+              logger.info(`[Pay] PDF receipt sent to ${freshCustomer.phone} (invoice ${lastInv.id})`);
+            } else {
+              logger.error(`[Pay] PDF receipt FAILED to ${freshCustomer.phone}: ${waResult.error}`);
+              // Enqueue for retry
+              const { enqueue } = require('../services/waQueueService');
+              enqueue(freshCustomer.phone, pdfPath, caption);
+              logger.info(`[Pay] Queued PDF receipt for retry (invoice ${lastInv.id})`);
+            }
+          }
+        }
+      } catch (e) {
+        logger.error(`[Pay] Failed to send PDF receipt: ${e.message}`);
+      }
+    } else {
+      logger.info(`[Pay] Skipped PDF send: no phone for customer ${req.params.id}`);
+    }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal bayar: ' + e.message };
   }
@@ -1196,8 +1236,12 @@ router.post('/packages/:id/delete', requireAdminSession, (req, res) => {
 
 // ─── BILLING ───────────────────────────────────────────────────────────────
 router.get('/billing', requireAdminSession, (req, res) => {
-  const { month: filterMonth, year: filterYear = new Date().getFullYear(), status: filterStatus = 'all', search = '' } = req.query;
-  const summary = billingSvc.getInvoiceSummary(filterMonth || new Date().getMonth()+1, filterYear);
+  const filterMonth = req.query.month;
+  const filterYear = req.query.year || new Date().getFullYear();
+  const filterStatus = req.query.status || 'unpaid';
+  const search = req.query.search || '';
+
+  const summary = billingSvc.getInvoiceSummary(filterMonth || new Date().getMonth()+1, filterYear, filterStatus);
   const invoices = billingSvc.getAllInvoices({ month: filterMonth, year: filterYear, status: filterStatus, search });
   res.render('admin/billing', {
     title: 'Tagihan', company: company(), activePage: 'billing',
@@ -1286,6 +1330,33 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
     }
 
     req.session._msg = { type: 'success', text: `${ids.length} tagihan berhasil dilunasi.` };
+
+    // Kirim PDF bukti pelunasan untuk invoice terakhir
+    if (customerId) {
+      const pdfCustomer = customerSvc.getCustomerById(customerId);
+      if (pdfCustomer && pdfCustomer.phone) {
+        try {
+          const lastId = ids[ids.length - 1];
+          const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${lastId}.pdf`);
+          logger.info(`[Pay-Bulk] Generating PDF at ${pdfPath}`);
+          await receiptPdf.generateReceipt(lastId, pdfPath);
+          if (fs.existsSync(pdfPath)) {
+            const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
+            const caption = `Yth. ${pdfCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
+            const waResult = await sendWhatsAppMedia(pdfCustomer.phone, pdfPath, caption);
+            if (waResult.success) {
+              logger.info(`[Pay-Bulk] PDF receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
+            } else {
+              logger.error(`[Pay-Bulk] PDF receipt FAILED: ${waResult.error}`);
+              const { enqueue } = require('../services/waQueueService');
+              enqueue(pdfCustomer.phone, pdfPath, caption);
+            }
+          }
+        } catch (e2) {
+          logger.error(`[Pay-Bulk] Failed to send PDF: ${e2.message}`);
+        }
+      }
+    }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal bayar massal: ' + e.message };
   }
@@ -1309,6 +1380,30 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
     }
 
     req.session._msg = { type: 'success', text: 'Tagihan berhasil ditandai lunas.' };
+
+    // Kirim PDF bukti pelunasan ke WA pelanggan
+    const pdfCustomer = customerSvc.getCustomerById(inv.customer_id);
+    if (pdfCustomer && pdfCustomer.phone) {
+      try {
+        const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${req.params.id}.pdf`);
+        logger.info(`[Pay-Single] Generating PDF at ${pdfPath}`);
+        await receiptPdf.generateReceipt(req.params.id, pdfPath);
+        if (fs.existsSync(pdfPath)) {
+          const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
+          const caption = `Yth. ${pdfCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
+          const waResult = await sendWhatsAppMedia(pdfCustomer.phone, pdfPath, caption);
+          if (waResult.success) {
+            logger.info(`[Pay-Single] PDF receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
+          } else {
+            logger.error(`[Pay-Single] PDF receipt FAILED: ${waResult.error}`);
+            const { enqueue } = require('../services/waQueueService');
+            enqueue(pdfCustomer.phone, pdfPath, caption);
+          }
+        }
+      } catch (e2) {
+        logger.error(`[Pay-Single] Failed to send PDF: ${e2.message}`);
+      }
+    }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
   }
@@ -1408,9 +1503,10 @@ router.post('/billing/:id/whatsapp', requireAdminSession, async (req, res) => {
     const customer = customerSvc.getCustomerById(inv.customer_id);
     if (!customer || !customer.phone) throw new Error('Nomor WhatsApp pelanggan tidak ditemukan');
 
-    const { sendWA, whatsappStatus } = await import('../services/whatsappBot.mjs');
+    const { sendWhatsApp } = await import('../services/evolutionService.js');
+const sendWA = sendWhatsApp;
     
-    if (whatsappStatus.connection !== 'open') {
+    if (false) {
       throw new Error('Bot WhatsApp belum terhubung. Silakan cek status WhatsApp di menu Admin.');
     }
 
@@ -1550,7 +1646,7 @@ router.get('/reports', requireAdminSession, (req, res) => {
   const filterYear = parseInt(req.query.year) || new Date().getFullYear();
   const now = new Date();
   const monthlyData = billingSvc.getMonthlyRevenue(filterYear);
-  const recentPayments = billingSvc.getRecentPayments(10);
+  const recentPayments = billingSvc.getAllPaidInvoices();
   const topUnpaid = billingSvc.getTopUnpaid(5);
   const activeCustomers = customerSvc.getCustomerStats().active;
 
@@ -2937,8 +3033,10 @@ function isTemporaryError(errorMessage) {
 global.broadcastMessageHistory = new Map();
 
 router.get('/whatsapp', requireAdminSession, async (req, res) => {
+  const { getSettingsWithCache } = require('../config/settingsManager');
   res.render('admin/whatsapp', {
-    title: 'Status WhatsApp', company: company(), activePage: 'whatsapp', msg: flashMsg(req)
+    title: 'Status WhatsApp', company: company(), activePage: 'whatsapp', msg: flashMsg(req),
+    settings: getSettingsWithCache()
   });
 });
 
@@ -3201,11 +3299,12 @@ router.get('/api/whatsapp/status', requireAdmin, async (req, res) => {
 
 router.post('/whatsapp/test-notification', requireAdminSession, async (req, res) => {
   try {
-    const { sendWA, whatsappStatus } = await import('../services/whatsappBot.mjs');
-    if (whatsappStatus.connection !== 'open') {
+    const { sendWhatsApp } = await import('../services/evolutionService.js');
+const sendWA = sendWhatsApp;
+    if (false) {
       throw new Error('Bot WhatsApp belum terhubung. Silakan scan QR hingga status Terhubung.');
     }
-    const adminPhone = '087820851413';
+    const adminPhone = getSetting('company_phone', '6282234924646');
     const msg =
       `🧪 *TEST NOTIFIKASI WHATSAPP*\n\n` +
       `✅ Jika pesan ini masuk, berarti notifikasi WhatsApp dari Billing Alijaya System sudah berfungsi.\n` +
@@ -3243,6 +3342,47 @@ router.post('/whatsapp/reset', requireAdminSession, (req, res) => {
     req.session._msg = { text: 'Gagal menghapus sesi: ' + e.message + '. (Kemungkinan file sedang digunakan, silakan matikan aplikasi dulu lalu hapus folder ' + getSetting('whatsapp_auth_folder', 'auth_info_baileys') + ' secara manual)', type: 'danger' };
     res.redirect('/admin/whatsapp');
   }
+});
+
+// API: Status Evolution API
+router.get('/api/whatsapp/evo-status', requireAdmin, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const evoUrl = getSetting('wa_evolution_url', 'http://10.10.10.100:8080');
+    const evoInstance = getSetting('wa_evolution_instance', 'billing');
+    const evoKey = getSetting('wa_evolution_api_key', '');
+    const r = await axios.get(`${evoUrl}/instance/connectionState/${evoInstance}`, {
+      headers: { apikey: evoKey }, timeout: 5000
+    });
+    const state = r.data?.instance?.state || r.data?.state || 'unknown';
+    // Ambil info nomor
+    let number = '-';
+    try {
+      const info = await axios.get(`${evoUrl}/instance/fetchInstances`, {
+        headers: { apikey: evoKey }, timeout: 5000
+      });
+      const inst = (info.data || []).find(i => i.instance?.instanceName === evoInstance || i.name === evoInstance);
+      number = inst?.instance?.owner || inst?.ownerJid || inst?.number || '-';
+    } catch(_) {}
+    res.json({ state, number, instance: evoInstance });
+  } catch (e) {
+    res.json({ state: 'error', number: '-', error: e.message });
+  }
+});
+
+// Toggle auto notif isolir
+router.post('/whatsapp/toggle-auto-billing', requireAdminSession, (req, res) => {
+  try {
+    const { getSettingsWithCache, saveSettings } = require('../config/settingsManager');
+    const s = getSettingsWithCache();
+    s.whatsapp_auto_billing_enabled = !s.whatsapp_auto_billing_enabled;
+    saveSettings(s);
+    const status = s.whatsapp_auto_billing_enabled ? 'diaktifkan' : 'dinonaktifkan';
+    req.session._msg = { type: 'success', text: `Auto notif isolir berhasil ${status}.` };
+  } catch (e) {
+    req.session._msg = { type: 'error', text: 'Gagal toggle: ' + e.message };
+  }
+  res.redirect('/admin/whatsapp');
 });
 
 // ─── ROUTERS (MULTI-ROUTER) ──────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang || 'id' %>">
+<html lang="<%= lang || 'id' %>" data-theme="light">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><%= title %> | <%= company %></title>
@@ -27,6 +27,9 @@
       <span><%= title %></span>
     </div>
     <div class="tb-right">
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light">
+        <i class="bi bi-moon-fill" id="themeIcon"></i>
+      </button>
       <a href="/admin/logout" class="btn btn-g btn-sm"><i class="bi bi-box-arrow-left"></i></a>
     </div>
   </div>

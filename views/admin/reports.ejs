@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang || 'id' %>">
+<html lang="<%= lang || 'id' %>" data-theme="light">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><%= t('admin.nav.finance_report', 'Laporan Keuangan') %> | <%= company %></title>
@@ -18,6 +18,9 @@
         <option value="<%= y %>" <%= filterYear==y?'selected':'' %>><%= y %></option>
         <% } %>
       </select>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light">
+        <i class="bi bi-moon-fill" id="themeIcon"></i>
+      </button>
       <span class="adm-badge"><i class="bi bi-person-fill"></i> <%= (typeof session !== 'undefined' && session.isCashier) ? t('admin.role.cashier', 'Kasir') : t('admin.role.admin', 'Admin') %></span>
       <a href="/admin/logout" class="btn btn-g btn-sm"><i class="bi bi-box-arrow-left"></i></a>
     </div>

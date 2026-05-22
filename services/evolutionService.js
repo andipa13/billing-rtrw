@@ -1,82 +1,88 @@
-const { getSetting } = require('../config/settingsManager.js');
-const { logger } = require('../config/logger.js');
+const axios = require('axios');
+const { getSettings } = require('../config/settingsManager');
+const { logger } = require('../config/logger');
 
-function getBaseConfig() {
-  return {
-    url: getSetting('wa_evolution_url', 'http://10.10.10.100:8080'),
-    apiKey: getSetting('wa_evolution_api_key', ''),
-    instance: getSetting('wa_evolution_instance', 'zya'),
-    enabled: getSetting('wa_evolution_enabled', true),
+async function sendWhatsApp(phone, message) {
+  const settings = getSettings();
+  if (!settings.wa_evolution_enabled) {
+    logger.info('Evolution API disabled, skipping WA send');
+    return { success: false, reason: 'disabled' };
+  }
+
+  const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
+  const headers = {
+    'apikey': settings.wa_evolution_api_key,
+    'Content-Type': 'application/json'
   };
-}
 
-async function sendText(number, text) {
-  const cfg = getBaseConfig();
-  if (!cfg.enabled || !cfg.apiKey) return { ok: false, reason: 'not_enabled' };
-  const cleanNumber = String(number).replace(/[^0-9]/g, '');
-  const endpoint = `${cfg.url}/message/sendText/${cfg.instance}`;
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: cfg.apiKey,
-      },
-      body: JSON.stringify({ number: cleanNumber, text }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      logger.error(`Evolution sendText error: ${JSON.stringify(data)}`);
-      return { ok: false, error: data };
-    }
-    logger.info(`Evolution sendText OK to ${cleanNumber}`);
-    return { ok: true, data };
-  } catch (err) {
-    logger.error(`Evolution sendText exception: ${err.message}`);
-    return { ok: false, error: err.message };
+    const response = await axios.post(url, {
+      number: phone,
+      text: message
+    }, { headers });
+
+    logger.info(`WA sent to ${phone}: ${response.status}`);
+    return { success: true, data: response.data };
+  } catch (error) {
+    logger.error(`Failed to send WA to ${phone}: ${error.message}`);
+    return { success: false, error: error.message };
   }
 }
 
-async function sendMedia(number, mediaBase64, mimeType, filename, caption = '') {
-  const cfg = getBaseConfig();
-  if (!cfg.enabled || !cfg.apiKey) return { ok: false, reason: 'not_enabled' };
-  const cleanNumber = String(number).replace(/[^0-9]/g, '');
-  // infer mediatype
-  let mediatype = 'document';
-  if (mimeType.startsWith('image/')) mediatype = 'image';
-  else if (mimeType.startsWith('video/')) mediatype = 'video';
-  else if (mimeType.startsWith('audio/')) mediatype = 'audio';
+async function sendWhatsAppMedia(phone, filePath, caption = '') {
+  const settings = getSettings();
+  if (!settings.wa_evolution_enabled) {
+    logger.info('Evolution API disabled, skipping WA media send');
+    return { success: false, reason: 'disabled' };
+  }
 
-  const endpoint = `${cfg.url}/message/sendMedia/${cfg.instance}`;
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: cfg.apiKey,
-      },
-      body: JSON.stringify({
-        number: cleanNumber,
-        mediatype,
-        media: mediaBase64,
-        fileName: filename || 'file',
-        caption,
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      logger.error(`Evolution sendMedia error: ${JSON.stringify(data)}`);
-      return { ok: false, error: data };
+  const fs = require('fs');
+  const path = require('path');
+  const fileBuffer = fs.readFileSync(filePath);
+  const base64Content = fileBuffer.toString('base64');
+  const ext = path.extname(filePath).toLowerCase();
+
+  const mediatypeMap = {
+    '.pdf': 'document',
+    '.jpg': 'image',
+    '.jpeg': 'image',
+    '.png': 'image',
+    '.mp4': 'video',
+    '.mp3': 'audio'
+  };
+  const mediatype = mediatypeMap[ext] || 'document';
+
+  const url = `${settings.wa_evolution_url}/message/sendMedia/${settings.wa_evolution_instance}`;
+  const headers = {
+    'apikey': settings.wa_evolution_api_key,
+    'Content-Type': 'application/json'
+  };
+
+  const payload = {
+    number: phone,
+    caption: caption,
+    mediatype: mediatype,
+    media: base64Content,
+    fileName: filePath.split('/').pop()
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await axios.post(url, payload, { headers });
+      logger.info(`WA media sent to ${phone}: ${response.status} (attempt ${attempt})`);
+      return { success: true, data: response.data };
+    } catch (error) {
+      let errorMsg = `Failed to send WA media to ${phone}: ${error.message}`;
+      if (error.response) {
+        errorMsg += '\nStatus: ' + error.response.status + ', data: ' + JSON.stringify(error.response.data);
+      }
+      logger.error(`${errorMsg} (attempt ${attempt}/3)`);
+      if (attempt === 3) {
+        return { success: false, error: errorMsg };
+      }
+      await new Promise(r => setTimeout(r, 3000));
     }
-    logger.info(`Evolution sendMedia OK to ${cleanNumber}`);
-    return { ok: true, data };
-  } catch (err) {
-    logger.error(`Evolution sendMedia exception: ${err.message}`);
-    return { ok: false, error: err.message };
   }
 }
 
-module.exports = {
-  sendText,
-  sendMedia,
-};
+module.exports = { sendWhatsApp, sendWhatsAppMedia };

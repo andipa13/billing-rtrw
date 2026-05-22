@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang || 'id' %>">
+<html lang="<%= lang || 'id' %>" data-theme="light">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><%= t('admin.customers.title', 'Pelanggan') %> | <%= company %></title>
@@ -20,6 +20,9 @@
   <div class="topbar">
     <div class="tb-title"><button class="hb-menu" onclick="toggleSidebar()"><i class="bi bi-list"></i></button><i class="bi bi-people"></i> <%= t('admin.customers.manage_title', 'Manajemen Pelanggan') %></div>
     <div class="tb-right">
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light">
+        <i class="bi bi-moon-fill" id="themeIcon"></i>
+      </button>
       <span class="adm-badge"><i class="bi bi-person-fill"></i> <%= (typeof session !== 'undefined' && session.isCashier) ? t('admin.role.cashier', 'Kasir') : t('admin.role.admin', 'Admin') %></span>
       <a href="/admin/logout" class="btn btn-g btn-sm"><i class="bi bi-box-arrow-left"></i></a>
     </div>
@@ -59,8 +62,8 @@
           <select class="fs" name="status" style="width:140px" onchange="this.form.submit()">
             <option value=""><%= t('admin.customers.filter.all_status', 'Semua Status') %></option>
             <option value="active" <%= filterStatus==='active' ? 'selected':'' %>><%= t('admin.customers.filter.active', 'Aktif') %></option>
-            <option value="suspended" <%= filterStatus==='suspended' ? 'selected':'' %>><%= t('admin.customers.filter.suspended', 'Suspend') %></option>
             <option value="inactive" <%= filterStatus==='inactive' ? 'selected':'' %>><%= t('admin.customers.filter.inactive', 'Nonaktif') %></option>
+            <option value="suspended" <%= filterStatus==='suspended' ? 'selected':'' %>><%= t('admin.customers.filter.suspended', 'Suspend') %></option>
           </select>
           <button class="btn btn-g btn-sm" type="submit"><i class="bi bi-search"></i> <%= t('common.search', 'Cari') %></button>
           <% if (search || filterStatus) { %><a href="/admin/customers" class="btn btn-g btn-sm"><i class="bi bi-x"></i> <%= t('common.reset', 'Reset') %></a><% } %>
@@ -68,18 +71,19 @@
       </div>
       <div class="tbl-wrap">
         <table class="dtbl">
-          <thead>
+                    <thead>
             <tr>
               <th>#</th>
-              <th>ID</th>
-              <th><%= t('admin.customers.table.name', 'Nama') %></th>
-              <th><%= t('admin.customers.table.phone_tag', 'Telepon / Tag ONU') %></th>
-              <th><%= t('admin.customers.table.package', 'Paket') %></th>
-              <th>Usage (FUP)</th>
-              <th><%= t('admin.customers.table.address', 'Alamat') %></th>
-              <th><%= t('admin.customers.table.status', 'Status') %></th>
-              <th><%= t('admin.customers.table.unpaid', 'Tagihan Belum Bayar') %></th>
-              <th><%= t('admin.customers.table.actions', 'Aksi') %></th>
+              <th><a href="/admin/customers?sort=customer_code&dir=<%= (sort==='customer_code' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">ID Pelanggan<% if (sort === 'customer_code') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=id&dir=<%= (sort==='id' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">ID<% if (sort === 'id') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=name&dir=<%= (sort==='name' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Nama<% if (sort === 'name') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=phone&dir=<%= (sort==='phone' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Telepon / Tag ONU<% if (sort === 'phone') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=package_name&dir=<%= (sort==='package_name' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Paket<% if (sort === 'package_name') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=isolate_day&dir=<%= (sort==='isolate_day' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Tgl Isolir<% if (sort === 'isolate_day') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=address&dir=<%= (sort==='address' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Alamat<% if (sort === 'address') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=status&dir=<%= (sort==='status' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Status<% if (sort === 'status') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th><a href="/admin/customers?sort=unpaid_count&dir=<%= (sort==='unpaid_count' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Tagihan Belum Bayar<% if (sort === 'unpaid_count') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
+              <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -88,11 +92,12 @@
           <% } %>
           <% customers.forEach((c, i) => { %>
             <tr>
-              <td class="text-muted"><%= i+1 %></td>
+              <td class="text-muted" style="font-size:12px"><%= i+1 %></td>
+              <td class="fw6" style="color:var(--primary);font-size:13px"><%= c.customer_code || '-' %></td>
               <td class="fw6" style="color:var(--primary)"><%= c.id %></td>
               <td class="fw6"><%= c.name %></td>
               <td>
-                <div><%= c.phone || '-' %></div>
+                <div><%= formatPhone(c.phone) %></div>
                 <% if (c.genieacs_tag) { %><div style="font-size:11px;color:var(--primary)"><i class="bi bi-wifi"></i> <%= c.genieacs_tag %></div><% } %>
               </td>
               <td>
@@ -101,30 +106,13 @@
                   <div style="font-size:11px;color:var(--muted)"><%= (c.speed_down/1000).toFixed(0) %>/<%= (c.speed_up/1000).toFixed(0) %> Mbps &bull; Rp <%= c.package_price ? c.package_price.toLocaleString('id-ID') : '-' %></div>
                 <% } else { %><span class="text-muted">-</span><% } %>
               </td>
-              <td>
-                <% 
-                  const usedGB = ((c.bytes_in || 0) + (c.bytes_out || 0)) / (1024 * 1024 * 1024);
-                  const limitGB = c.fup_limit_gb || 0;
-                  const useFup = c.use_fup === 1;
-                %>
-                <div class="fw6" style="font-size:12px"><%= usedGB.toFixed(2) %> GB</div>
-                <% if (useFup && limitGB > 0) { 
-                   const percent = Math.min(100, (usedGB / limitGB) * 100);
-                   const barColor = percent > 90 ? 'var(--danger)' : percent > 70 ? 'var(--warning)' : 'var(--success)';
-                %>
-                  <div class="usage-bar">
-                    <div class="usage-fill" style="--p: <%= percent %>%; --b: <%= barColor %>;"></div>
-                  </div>
-                  <div style="font-size:10px; color:var(--muted)">Limit: <%= limitGB %> GB</div>
-                <% } else { %>
-                  <div style="font-size:10px; color:var(--muted)">Unlimited</div>
-                <% } %>
-              </td>
+              <td class="text-center" style="font-weight:600; color:var(--primary); font-size:13px"><%= c.isolate_day || 10 %></td>
               <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><%= c.address || '-' %></td>
               <td>
                 <% if (c.status==='active') { %><span class="badge bs"><i class="bi bi-circle-fill" style="font-size:7px"></i><%= t('admin.customers.filter.active', 'Aktif') %></span>
+                <% } else if (c.status==='inactive') { %><span class="badge bm"><%= t('admin.customers.filter.inactive', 'Nonaktif') %></span>
                 <% } else if (c.status==='suspended') { %><span class="badge bw"><%= t('admin.customers.filter.suspended', 'Suspend') %></span>
-                <% } else { %><span class="badge bm"><%= t('admin.customers.filter.inactive', 'Nonaktif') %></span><% } %>
+                <% } else { %><span class="badge bm"><%= c.status || '-' %></span><% } %>
                 <div style="font-size:10px;margin-top:4px">
                   <i class="bi bi-clock-history"></i> <%= t('admin.customers.auto_isolate.label', 'Auto Isolir') %>:
                   <span class="<%= c.auto_isolate === 0 ? 'text-danger' : 'text-success' %>">
@@ -176,7 +164,10 @@
           <div class="fg"><label class="fl">Nama Lengkap *</label><input class="fc" name="name" required placeholder="John Doe"></div>
           <div class="fg"><label class="fl">No. Telepon / WA</label><input class="fc" name="phone" placeholder="08xxx"></div>
         </div>
-        <div class="fg"><label class="fl">Email (Untuk Notifikasi Payment)</label><input class="fc" name="email" type="email" placeholder="customer@example.com"></div>
+        <div class="form-row">
+          <div class="fg"><label class="fl">ID Pelanggan (Auto)</label><input class="fc" name="customer_code" id="add_customer_code" readonly placeholder="Generate otomatis 5 angka"></div>
+          <div class="fg"><label class="fl">Email (Untuk Notifikasi Payment)</label><input class="fc" name="email" type="email" placeholder="customer@example.com"></div>
+        </div>
         <div class="fg"><label class="fl">Alamat</label><textarea class="fc" name="address" placeholder="Jl. Example..."></textarea></div>
         <div class="form-row">
           <div class="fg">
@@ -239,8 +230,8 @@
             <label class="fl">Status</label>
             <select class="fs" name="status">
               <option value="active">Aktif</option>
-              <option value="suspended">Suspend</option>
               <option value="inactive">Nonaktif</option>
+              <option value="suspended">Suspend</option>
             </select>
           </div>
           <div class="fg"><label class="fl">Tanggal Pasang</label><input class="fc" type="date" name="install_date"></div>
@@ -340,7 +331,10 @@
           <div class="fg"><label class="fl">Nama Lengkap *</label><input class="fc" name="name" id="e_name" required></div>
           <div class="fg"><label class="fl">No. Telepon / WA</label><input class="fc" name="phone" id="e_phone"></div>
         </div>
-        <div class="fg"><label class="fl">Email (Untuk Notifikasi Payment)</label><input class="fc" name="email" id="e_email" type="email"></div>
+        <div class="form-row">
+          <div class="fg"><label class="fl">ID Pelanggan</label><input class="fc" name="customer_code" id="e_customer_code" placeholder="5 angka unik"></div>
+          <div class="fg"><label class="fl">Email (Untuk Notifikasi Payment)</label><input class="fc" name="email" id="e_email" type="email"></div>
+        </div>
         <div class="fg"><label class="fl">Alamat</label><textarea class="fc" name="address" id="e_address"></textarea></div>
         <div class="form-row">
           <div class="fg">
@@ -608,7 +602,7 @@ const officeCoords = {
   lng: parseFloat(appSettings.office_lng) || 106.816666
 };
 
-function openModal(id){document.getElementById(id).classList.add('show')}
+function openModal(id){document.getElementById(id).classList.add('show'); if(id==='addModal'){document.getElementById('add_customer_code').value=Math.floor(10000+Math.random()*90000).toString();}}
 function closeModal(id){document.getElementById(id).classList.remove('show')}
 
 function openPicker(type) {
@@ -688,6 +682,7 @@ function editCust(idx) {
   document.getElementById('editForm').action='/admin/customers/'+c.id+'/update';
   document.getElementById('e_name').value=c.name||'';
   document.getElementById('e_phone').value=c.phone||'';
+  document.getElementById('e_customer_code').value=c.customer_code||'';
   document.getElementById('e_email').value=c.email||'';
   document.getElementById('e_address').value=c.address||'';
   document.getElementById('e_package').value=c.package_id||'';

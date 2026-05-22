@@ -10,6 +10,9 @@ const { logger } = require('../config/logger');
 const ticketSvc = require('../services/ticketService');
 const crypto = require('crypto');
 const db = require('../config/database');
+const path = require('path');
+const fs = require('fs');
+const receiptPdf = require('../services/receiptPdfService');
 
 function dashboardNotif(message, type = 'success') {
   if (!message) return null;
@@ -236,6 +239,24 @@ const {
 router.get('/login', (req, res) => {
   const settings = getSettingsWithCache();
   res.render('login', { error: null, settings });
+});
+
+router.get('/receipt/:invoiceId', async (req, res) => {
+  try {
+    const inv = billingSvc.getInvoiceById(req.params.invoiceId);
+    if (!inv || inv.status !== 'paid') return res.status(404).send('Bukti pembayaran tidak ditemukan');
+
+    const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${inv.id}.pdf`);
+    await receiptPdf.generateReceipt(inv.id, pdfPath);
+
+    if (!fs.existsSync(pdfPath)) return res.status(500).send('Gagal generate PDF');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Bukti_Pembayaran_${inv.id}.pdf"`);
+    fs.createReadStream(pdfPath).pipe(res);
+  } catch (e) {
+    res.status(500).send('Gagal: ' + e.message);
+  }
 });
 
 router.get('/check-billing', async (req, res) => {
@@ -606,7 +627,7 @@ router.post('/login', async (req, res) => {
   if (!device && !customer) {
     logger.warn('[Login] Gagal: pelanggan tidak ditemukan.');
     return res.render('login', { 
-      error: 'Data pelanggan tidak ditemukan. Pastikan nomor WhatsApp sudah benar.', 
+      error: 'Data pelanggan tidak ditemukan. Pastikan ID Login 5 angka sudah benar.', 
       settings 
     });
   }
@@ -633,9 +654,10 @@ router.post('/login', async (req, res) => {
     // Kirim via WhatsApp
     if (settings.whatsapp_enabled) {
       try {
-        const { sendWA, whatsappStatus } = await import('../services/whatsappBot.mjs');
+        const { sendWhatsApp } = await import('../services/evolutionService.js');
+const sendWA = sendWhatsApp;
         
-        if (whatsappStatus.connection !== 'open') {
+        if (false) {
           throw new Error('Sistem WhatsApp sedang tidak aktif. Silakan hubungi Admin.');
         }
 
@@ -1459,8 +1481,9 @@ router.post('/payment/callback', express.json(), async (req, res) => {
 
         if (settings.whatsapp_enabled) {
           try {
-            const { sendWA, whatsappStatus } = await import('../services/whatsappBot.mjs');
-            if (whatsappStatus.connection !== 'open') throw new Error('Bot WhatsApp belum terhubung');
+            const { sendWhatsApp } = await import('../services/evolutionService.js');
+const sendWA = sendWhatsApp;
+            if (false) throw new Error('Bot WhatsApp belum terhubung');
             if (!fresh.buyer_phone) throw new Error('Nomor WhatsApp pembeli kosong');
             const msg =
               `🎫 *VOUCHER HOTSPOT*\n\n` +
@@ -1505,8 +1528,9 @@ router.post('/payment/callback', express.json(), async (req, res) => {
       const customer = customerSvc.getCustomerById(checkInv.customer_id);
       
       try {
-        const { sendWA, whatsappStatus } = await import('../services/whatsappBot.mjs');
-        if (whatsappStatus.connection !== 'open') {
+        const { sendWhatsApp } = await import('../services/evolutionService.js');
+const sendWA = sendWhatsApp;
+        if (false) {
           throw new Error('Bot WhatsApp belum terhubung');
         }
         if (!customer.phone) {
