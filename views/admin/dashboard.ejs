@@ -145,7 +145,55 @@
       </div>
       <% } %>
 
-      <!-- Row: Donut + Recent Devices -->
+      <!-- Server Stats Widget -->
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:20px 0 10px">
+        <i class="bi bi-server"></i> Monitor Server
+        <span id="srv-uptime" style="float:right;font-size:11px;color:var(--muted)"></span>
+      </div>
+      <div class="stat-grid" id="server-stats-grid" style="margin-bottom:18px">
+        <!-- CPU Usage -->
+        <div class="sc" style="background:var(--card-bg)">
+          <i class="bi bi-cpu sc-icon" style="color:#6366f1"></i>
+          <div class="sc-label">CPU Usage</div>
+          <div class="sc-val" id="srv-cpu-val" style="font-size:20px">-</div>
+          <div style="margin:6px 0 2px;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+            <div id="srv-cpu-bar" style="height:100%;width:0%;background:#6366f1;border-radius:4px;transition:width .5s"></div>
+          </div>
+          <div class="sc-sub" id="srv-cpu-sub">memuat...</div>
+        </div>
+        <!-- CPU Temp -->
+        <div class="sc" style="background:var(--card-bg)">
+          <i class="bi bi-thermometer-half sc-icon" style="color:#f59e0b" id="srv-temp-icon"></i>
+          <div class="sc-label">Suhu CPU</div>
+          <div class="sc-val" id="srv-temp-val" style="font-size:20px">-</div>
+          <div style="margin:6px 0 2px;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+            <div id="srv-temp-bar" style="height:100%;width:0%;background:#f59e0b;border-radius:4px;transition:width .5s"></div>
+          </div>
+          <div class="sc-sub" id="srv-temp-sub">memuat...</div>
+        </div>
+        <!-- RAM -->
+        <div class="sc" style="background:var(--card-bg)">
+          <i class="bi bi-memory sc-icon" style="color:#10b981"></i>
+          <div class="sc-label">RAM</div>
+          <div class="sc-val" id="srv-ram-val" style="font-size:20px">-</div>
+          <div style="margin:6px 0 2px;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+            <div id="srv-ram-bar" style="height:100%;width:0%;background:#10b981;border-radius:4px;transition:width .5s"></div>
+          </div>
+          <div class="sc-sub" id="srv-ram-sub">memuat...</div>
+        </div>
+        <!-- Disk -->
+        <div class="sc" style="background:var(--card-bg)">
+          <i class="bi bi-hdd sc-icon" style="color:#3b82f6"></i>
+          <div class="sc-label">Disk /</div>
+          <div class="sc-val" id="srv-disk-val" style="font-size:20px">-</div>
+          <div style="margin:6px 0 2px;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+            <div id="srv-disk-bar" style="height:100%;width:0%;background:#3b82f6;border-radius:4px;transition:width .5s"></div>
+          </div>
+          <div class="sc-sub" id="srv-disk-sub">memuat...</div>
+        </div>
+      </div>
+
+
       <div class="dash-main-grid">
 
         <!-- Donut Chart -->
@@ -719,6 +767,67 @@ loadDevices();
 
 // ── CHECK IF SHOULD GO TO MONITORING TAB (from sidebar link) ──
 if (window.location.hash === '#monitoring') showTab('monitoring');
+
+// ── SERVER STATS ──────────────────────────────────────────────
+function colorBar(pct, type) {
+  if (type === 'temp') {
+    if (pct >= 80) return '#ef4444';
+    if (pct >= 60) return '#f59e0b';
+    return '#10b981';
+  }
+  if (pct >= 90) return '#ef4444';
+  if (pct >= 75) return '#f59e0b';
+  return null; // pakai warna default
+}
+
+async function loadServerStats() {
+  try {
+    const r = await fetch('/admin/api/server-stats');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    // CPU Usage
+    document.getElementById('srv-cpu-val').textContent = d.cpu.usage + '%';
+    document.getElementById('srv-cpu-bar').style.width = d.cpu.usage + '%';
+    const cpuColor = colorBar(d.cpu.usage, 'cpu');
+    if (cpuColor) document.getElementById('srv-cpu-bar').style.background = cpuColor;
+    document.getElementById('srv-cpu-sub').textContent = d.cpu.usage >= 90 ? '⚠️ Tinggi' : d.cpu.usage >= 75 ? 'Sedang' : 'Normal';
+
+    // CPU Temp
+    if (d.cpu.temp !== null) {
+      const tempPct = Math.min(Math.round((d.cpu.temp / 100) * 100), 100);
+      const tempColor = colorBar(d.cpu.temp, 'temp');
+      document.getElementById('srv-temp-val').textContent = d.cpu.temp + '°C';
+      document.getElementById('srv-temp-bar').style.width = tempPct + '%';
+      document.getElementById('srv-temp-bar').style.background = tempColor;
+      document.getElementById('srv-temp-icon').style.color = tempColor;
+      document.getElementById('srv-temp-sub').textContent = d.cpu.temp >= 80 ? '🔥 Panas!' : d.cpu.temp >= 60 ? 'Hangat' : 'Dingin';
+    } else {
+      document.getElementById('srv-temp-val').textContent = 'N/A';
+      document.getElementById('srv-temp-sub').textContent = 'Sensor tidak tersedia';
+    }
+
+    // RAM
+    document.getElementById('srv-ram-val').textContent = d.ram.pct + '%';
+    document.getElementById('srv-ram-bar').style.width = d.ram.pct + '%';
+    const ramColor = colorBar(d.ram.pct, 'ram');
+    if (ramColor) document.getElementById('srv-ram-bar').style.background = ramColor;
+    document.getElementById('srv-ram-sub').textContent = d.ram.usedGb + ' / ' + d.ram.totalGb + ' GB';
+
+    // Disk
+    document.getElementById('srv-disk-val').textContent = d.disk.pct + '%';
+    document.getElementById('srv-disk-bar').style.width = d.disk.pct + '%';
+    const diskColor = colorBar(d.disk.pct, 'disk');
+    if (diskColor) document.getElementById('srv-disk-bar').style.background = diskColor;
+    document.getElementById('srv-disk-sub').textContent = d.disk.usedGb + ' / ' + d.disk.totalGb + ' GB';
+
+    // Uptime
+    document.getElementById('srv-uptime').textContent = '⏱ Uptime: ' + d.uptime;
+  } catch(e) {}
+}
+
+loadServerStats();
+setInterval(loadServerStats, 15000);
 </script>
 </body>
 </html>

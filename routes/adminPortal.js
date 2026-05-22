@@ -3473,4 +3473,56 @@ router.get('/api/mikrotik/users/:routerId', requireAdmin, async (req, res) => {
   }
 });
 
+// ─── SERVER STATS (CPU Temp, RAM, Disk) ────────────────────────────────────
+router.get('/api/server-stats', requireAdmin, async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+
+    // CPU Temp
+    let cpuTemp = null;
+    try {
+      const raw = execSync('cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null', { timeout: 2000 }).toString().trim();
+      cpuTemp = parseFloat((parseInt(raw) / 1000).toFixed(1));
+    } catch (e) {}
+
+    // RAM
+    const memRaw = execSync('cat /proc/meminfo', { timeout: 2000 }).toString();
+    const memTotal = parseInt(memRaw.match(/MemTotal:\s+(\d+)/)?.[1] || 0);
+    const memAvail = parseInt(memRaw.match(/MemAvailable:\s+(\d+)/)?.[1] || 0);
+    const memUsed = memTotal - memAvail;
+    const memPct = memTotal ? Math.round((memUsed / memTotal) * 100) : 0;
+
+    // Disk
+    const dfRaw = execSync("df -k / | tail -1", { timeout: 2000 }).toString().trim().split(/\s+/);
+    const diskTotal = parseInt(dfRaw[1]);
+    const diskUsed = parseInt(dfRaw[2]);
+    const diskPct = diskTotal ? Math.round((diskUsed / diskTotal) * 100) : 0;
+
+    // CPU Usage
+    const cpuRaw = execSync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", { timeout: 3000 }).toString().trim();
+    const cpuPct = parseFloat(cpuRaw) || 0;
+
+    // Uptime
+    const uptimeRaw = execSync('cat /proc/uptime', { timeout: 2000 }).toString().trim();
+    const uptimeSec = parseInt(uptimeRaw.split(' ')[0]);
+    const days = Math.floor(uptimeSec / 86400);
+    const hours = Math.floor((uptimeSec % 86400) / 3600);
+    const mins = Math.floor((uptimeSec % 3600) / 60);
+    const uptime = days > 0 ? `${days}d ${hours}h ${mins}m` : `${hours}h ${mins}m`;
+
+    res.json({
+      cpu: { usage: Math.round(cpuPct), temp: cpuTemp },
+      ram: { total: memTotal, used: memUsed, pct: memPct,
+             totalGb: (memTotal / 1024 / 1024).toFixed(1),
+             usedGb: (memUsed / 1024 / 1024).toFixed(1) },
+      disk: { total: diskTotal, used: diskUsed, pct: diskPct,
+              totalGb: (diskTotal / 1024 / 1024).toFixed(1),
+              usedGb: (diskUsed / 1024 / 1024).toFixed(1) },
+      uptime
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

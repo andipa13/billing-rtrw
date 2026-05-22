@@ -1,6 +1,5 @@
 /**
  * Service: System Diagnostics & Troubleshooting
- * Melakukan pengecekan terhadap dependensi eksternal dan diagnosa masalah
  */
 const { logger } = require('../config/logger');
 const db = require('../config/database');
@@ -26,35 +25,29 @@ async function checkDependencies() {
     const routers = db.prepare('SELECT * FROM routers').all();
     for (const r of routers) {
       try {
-        // Simple connectivity check (get identity or similar)
-        const isOnline = await mikrotikService.checkConnection(r.id);
-        results.mikrotik.push({
-          name: r.name,
-          host: r.host,
-          status: isOnline ? 'online' : 'offline',
-          error: isOnline ? null : 'Connection failed'
-        });
+        await mikrotikService.getPppoeActive(r.id);
+        results.mikrotik.push({ name: r.name, host: r.host, status: 'online', error: null });
       } catch (err) {
-        results.mikrotik.push({
-          name: r.name,
-          host: r.host,
-          status: 'offline',
-          error: err.message
-        });
+        results.mikrotik.push({ name: r.name, host: r.host, status: 'offline', error: err.message });
       }
     }
   } catch (err) {
     logger.error(`[Diagnostics] MikroTik check failed: ${err.message}`);
   }
 
-  // 2. Check GenieACS
+  // 2. Check GenieACS — gunakan /devices endpoint bukan root
   try {
     const { getSetting } = require('../config/settingsManager');
     const acsUrl = getSetting('genieacs_url', 'http://localhost:7557');
-    const response = await axios.get(acsUrl, { timeout: 3000 });
+    const user = getSetting('genieacs_username', 'admin');
+    const pass = getSetting('genieacs_password', 'admin');
+    const response = await axios.get(`${acsUrl}/devices/?limit=1`, {
+      timeout: 3000,
+      auth: user && pass ? { username: user, password: pass } : undefined
+    });
     results.genieacs = {
       status: response.status === 200 ? 'online' : 'warning',
-      message: `GenieACS is responding (Status: ${response.status})`
+      message: `GenieACS OK (${response.status})`
     };
   } catch (err) {
     results.genieacs = {
@@ -63,16 +56,26 @@ async function checkDependencies() {
     };
   }
 
-  // 3. Check WhatsApp Gateway (Internal Check)
+  // 3. Check WhatsApp via Evolution API
   try {
-    const whatsappSvc = require('./whatsapp'); // Assuming it exists
-    const isConnected = whatsappSvc.isConnected ? whatsappSvc.isConnected() : false;
+    const { getSetting } = require('../config/settingsManager');
+    const evoUrl = getSetting('evolution_api_url', 'http://10.10.10.100:8080');
+    const evoToken = getSetting('evolution_api_token', 'FCE130974DA7-499E-8518-607F023CC89C');
+    const instance = getSetting('evolution_instance', 'billing');
+    const response = await axios.get(`${evoUrl}/instance/connectionState/${instance}`, {
+      timeout: 3000,
+      headers: { apikey: evoToken }
+    });
+    const state = response.data?.instance?.state;
     results.whatsapp = {
-      status: isConnected ? 'online' : 'offline',
-      message: isConnected ? 'WhatsApp is connected' : 'WhatsApp is disconnected'
+      status: state === 'open' ? 'online' : 'offline',
+      message: `Evolution API: ${state || 'unknown'}`
     };
   } catch (err) {
-    results.whatsapp = { status: 'offline', message: 'WhatsApp service error' };
+    results.whatsapp = {
+      status: 'offline',
+      message: `Evolution API error: ${err.message}`
+    };
   }
 
   return results;
@@ -85,7 +88,6 @@ function getRecentErrors(limit = 10) {
   try {
     const logPath = path.join(__dirname, '../logs/error.log');
     if (!fs.existsSync(logPath)) return [];
-
     const content = fs.readFileSync(logPath, 'utf8');
     const lines = content.split('\n').filter(line => line.trim() !== '');
     return lines.slice(-limit).reverse();
@@ -109,12 +111,10 @@ async function diagnoseCustomer(customerId) {
     timestamp: new Date().toISOString()
   };
 
-  // 1. Billing Check
   const unpaid = db.prepare("SELECT COUNT(*) as count FROM invoices WHERE customer_id = ? AND status = 'unpaid'").get(customerId);
   report.billing.unpaidCount = unpaid.count;
   if (unpaid.count > 0) report.billing.status = 'warning';
 
-  // 2. MikroTik Check
   if (customer.pppoe_username && customer.router_id) {
     try {
       const active = await mikrotikService.getPppoeActive(customer.router_id);
@@ -122,11 +122,7 @@ async function diagnoseCustomer(customerId) {
       if (session) {
         report.mikrotik = {
           status: 'online',
-          details: {
-            uptime: session.uptime,
-            address: session.address,
-            caller_id: session['caller-id']
-          }
+          details: { uptime: session.uptime, address: session.address, caller_id: session['caller-id'] }
         };
       } else {
         report.mikrotik.status = 'offline';
@@ -140,8 +136,4 @@ async function diagnoseCustomer(customerId) {
   return report;
 }
 
-module.exports = {
-  checkDependencies,
-  getRecentErrors,
-  diagnoseCustomer
-};
+module.exports = { checkDependencies, getRecentErrors, diagnoseCustomer };
