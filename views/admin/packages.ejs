@@ -309,33 +309,26 @@ function toggleEditNight() { document.getElementById('e_night_fields').style.dis
 function toggleEditFup() { document.getElementById('e_fup_fields').style.display = document.getElementById('e_use_fup').checked ? 'block' : 'none'; }
 setTimeout(()=>document.querySelectorAll('.alert').forEach(a=>a.style.display='none'),4000);
 
-// Load MikroTik profiles into select dropdowns
-async function loadProfiles() {
-  try {
-    const res = await fetch('/admin/api/mikrotik/profiles');
-    if (!res.ok) return;
-    const profiles = await res.json();
-    const selAdd = document.getElementById('add_profile_select');
-    const selEdit = document.getElementById('e_profile_select');
-    const selAddNight = document.getElementById('add_night_profile_select');
-    const selAddFup = document.getElementById('add_fup_profile_select');
-    const selEditNight = document.getElementById('e_night_profile_select');
-    const selEditFup = document.getElementById('e_fup_profile_select');
-
-    profiles.forEach(p => {
-      const opt = `<option value="${p.name}">${p.name}</option>`;
-      selAdd.innerHTML += opt;
-      selEdit.innerHTML += opt;
-      if (selAddNight) selAddNight.innerHTML += opt;
-      if (selAddFup) selAddFup.innerHTML += opt;
-      if (selEditNight) selEditNight.innerHTML += opt;
-      if (selEditFup) selEditFup.innerHTML += opt;
-    });
-  } catch (e) {
-    console.error('Failed to load MikroTik profiles', e);
-  }
-}
-loadProfiles();
+// Load MikroTik profiles dari server-side render
+(function loadProfiles() {
+  const profiles = <%- JSON.stringify(mikrotikProfiles || []) %>;
+  if (!profiles.length) return;
+  const selAdd = document.getElementById('add_profile_select');
+  const selEdit = document.getElementById('e_profile_select');
+  const selAddNight = document.getElementById('add_night_profile_select');
+  const selAddFup = document.getElementById('add_fup_profile_select');
+  const selEditNight = document.getElementById('e_night_profile_select');
+  const selEditFup = document.getElementById('e_fup_profile_select');
+  profiles.forEach(p => {
+    const opt = `<option value="${p.name}">${p.name}${p.rateLimit && p.rateLimit !== '-' ? ' ('+p.rateLimit+')' : ''}</option>`;
+    if (selAdd) selAdd.innerHTML += opt;
+    if (selEdit) selEdit.innerHTML += opt;
+    if (selAddNight) selAddNight.innerHTML += opt;
+    if (selAddFup) selAddFup.innerHTML += opt;
+    if (selEditNight) selEditNight.innerHTML += opt;
+    if (selEditFup) selEditFup.innerHTML += opt;
+  });
+})();
 </script>
 </body>
 </html>

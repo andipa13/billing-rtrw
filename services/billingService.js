@@ -13,32 +13,26 @@ function sendPdfToWA(invoiceId, filePath) {
   const settings = getSettingsWithCache();
   if (!settings.wa_evolution_enabled) return;
   
-  const url = `${settings.wa_evolution_url}/message/sendMedia/${settings.wa_evolution_instance}`;
+  const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
   const apikey = settings.wa_evolution_api_key;
   
   const invoice = db.prepare('SELECT c.phone FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?').get(invoiceId);
   if (!invoice || !invoice.phone) return;
   
-  const publicPath = '/root/ali-jaya-billing/public/receipts/' + path.basename(filePath);
-  if (!fs.existsSync('/root/ali-jaya-billing/public/receipts')) fs.mkdirSync('/root/ali-jaya-billing/public/receipts', { recursive: true });
-  fs.copyFileSync(filePath, publicPath);
-  
-  const fileUrl = `http://${settings.server_host}:${settings.server_port}/receipts/${path.basename(filePath)}`;
+  const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoiceId}`;
   
   const phone = invoice.phone.startsWith('62') ? invoice.phone : '62' + invoice.phone.replace(/^0/, '');
   const fileName = path.basename(filePath);
 
+  const text = `Terima kasih telah melakukan pembayaran.\n\nBukti pembayaran Invoice #${invoiceId} dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+
   axios.post(url, {
     number: phone,
-    mediatype: 'document',
-    mimetype: 'application/pdf',
-    caption: `Bukti Pembayaran Invoice #${invoiceId} - ZyaNet`,
-    media: fileUrl,
-    fileName: fileName
+    text: text
   }, { headers: { apikey } }).then(res => {
-    console.log(`[WA] PDF receipt invoice #${invoiceId} terkirim ke ${phone}`);
+    console.log(`[WA] Link receipt invoice #${invoiceId} terkirim ke ${phone}`);
   }).catch(err => {
-    console.error(`[WA] Gagal kirim PDF invoice #${invoiceId}:`, err.response?.data || err.message);
+    console.error(`[WA] Gagal kirim link receipt invoice #${invoiceId}:`, err.response?.data || err.message);
   });
 }
 

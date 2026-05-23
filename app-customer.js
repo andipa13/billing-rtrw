@@ -371,6 +371,7 @@ if (getSetting('whatsapp_enabled', false)) {
     .catch((err) => logger.error('Gagal memulai WhatsApp bot:', err));
 }
 
+// Telegram bot - hanya 1 instance yang boleh polling
 if (getSetting('telegram_enabled', false)) {
   const { initTelegram } = require('./services/telegramBot');
   initTelegram();

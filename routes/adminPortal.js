@@ -1154,41 +1154,27 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
       await customerSvc.activateCustomer(req.params.id);
     }
 
-    // Kirim PDF bukti pelunasan langsung ke WA pelanggan
-    logger.info(`[Pay] Checking PDF send for customer ${req.params.id}, phone=${freshCustomer ? freshCustomer.phone : 'no-customer'}`);
+    // Kirim link bukti pelunasan ke WA pelanggan
+    logger.info(`[Pay] Checking WA send for customer ${req.params.id}, phone=${freshCustomer ? freshCustomer.phone : 'no-customer'}`);
     if (freshCustomer && freshCustomer.phone) {
       try {
         const lastInv = db.prepare('SELECT id FROM invoices WHERE customer_id = ? ORDER BY paid_at DESC, id DESC LIMIT 1').get(req.params.id);
-        logger.info(`[Pay] Last invoice for ${req.params.id}: ${lastInv ? lastInv.id : 'none'}`);
         if (lastInv) {
-          const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${lastInv.id}.pdf`);
-          logger.info(`[Pay] Generating PDF at ${pdfPath}`);
-          await receiptPdf.generateReceipt(lastInv.id, pdfPath);
-          logger.info(`[Pay] PDF generated, exists=${fs.existsSync(pdfPath)}`);
-          if (fs.existsSync(pdfPath)) {
-            const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
-            const caption = `Yth. ${freshCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
-            const waResult = await sendWhatsAppMedia(
-              freshCustomer.phone,
-              pdfPath,
-              caption
-            );
-            if (waResult.success) {
-              logger.info(`[Pay] PDF receipt sent to ${freshCustomer.phone} (invoice ${lastInv.id})`);
-            } else {
-              logger.error(`[Pay] PDF receipt FAILED to ${freshCustomer.phone}: ${waResult.error}`);
-              // Enqueue for retry
-              const { enqueue } = require('../services/waQueueService');
-              enqueue(freshCustomer.phone, pdfPath, caption);
-              logger.info(`[Pay] Queued PDF receipt for retry (invoice ${lastInv.id})`);
-            }
+          const { sendWhatsAppText } = await import('../services/evolutionService.js');
+          const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastInv.id}`;
+          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+          const waResult = await sendWhatsAppText(freshCustomer.phone, text);
+          if (waResult.success) {
+            logger.info(`[Pay] Link receipt sent to ${freshCustomer.phone} (invoice ${lastInv.id})`);
+          } else {
+            logger.error(`[Pay] Link receipt FAILED to ${freshCustomer.phone}: ${waResult.error}`);
           }
         }
       } catch (e) {
-        logger.error(`[Pay] Failed to send PDF receipt: ${e.message}`);
+        logger.error(`[Pay] Failed to send link receipt: ${e.message}`);
       }
     } else {
-      logger.info(`[Pay] Skipped PDF send: no phone for customer ${req.params.id}`);
+      logger.info(`[Pay] Skipped WA send: no phone for customer ${req.params.id}`);
     }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal bayar: ' + e.message };
@@ -1197,10 +1183,20 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
 });
 
 // ─── PACKAGES ──────────────────────────────────────────────────────────────
-router.get('/packages', requireAdminSession, (req, res) => {
+router.get('/packages', requireAdminSession, async (req, res) => {
+  let mikrotikProfiles = [];
+  try {
+    mikrotikProfiles = await mikrotikService.getPppoeProfiles(null);
+  } catch (e) {
+    logger.warn('[packages] Gagal ambil profil MikroTik:', e.message);
+  }
+  // Filter hanya profil yang relevan (bukan sistem/isolir)
+  const skipProfiles = ['default', 'default-encryption', 'ISOLIR-1-SEGMEN', 'vpn-mikhmon', 'VOUCHER', 'profile1-tr069', 'acs'];
+  const filteredProfiles = mikrotikProfiles.filter(p => !skipProfiles.includes(p.name));
   res.render('admin/packages', {
     title: 'Paket Internet', company: company(), activePage: 'packages',
-    packages: customerSvc.getAllPackages(), msg: flashMsg(req)
+    packages: customerSvc.getAllPackages(), msg: flashMsg(req),
+    mikrotikProfiles: filteredProfiles
   });
 });
 
@@ -1331,29 +1327,23 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
 
     req.session._msg = { type: 'success', text: `${ids.length} tagihan berhasil dilunasi.` };
 
-    // Kirim PDF bukti pelunasan untuk invoice terakhir
+    // Kirim link bukti pelunasan untuk invoice terakhir
     if (customerId) {
       const pdfCustomer = customerSvc.getCustomerById(customerId);
       if (pdfCustomer && pdfCustomer.phone) {
         try {
           const lastId = ids[ids.length - 1];
-          const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${lastId}.pdf`);
-          logger.info(`[Pay-Bulk] Generating PDF at ${pdfPath}`);
-          await receiptPdf.generateReceipt(lastId, pdfPath);
-          if (fs.existsSync(pdfPath)) {
-            const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
-            const caption = `Yth. ${pdfCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
-            const waResult = await sendWhatsAppMedia(pdfCustomer.phone, pdfPath, caption);
-            if (waResult.success) {
-              logger.info(`[Pay-Bulk] PDF receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
-            } else {
-              logger.error(`[Pay-Bulk] PDF receipt FAILED: ${waResult.error}`);
-              const { enqueue } = require('../services/waQueueService');
-              enqueue(pdfCustomer.phone, pdfPath, caption);
-            }
+          const { sendWhatsAppText } = await import('../services/evolutionService.js');
+          const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastId}`;
+          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+          const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
+          if (waResult.success) {
+            logger.info(`[Pay-Bulk] Link receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
+          } else {
+            logger.error(`[Pay-Bulk] Link receipt FAILED: ${waResult.error}`);
           }
         } catch (e2) {
-          logger.error(`[Pay-Bulk] Failed to send PDF: ${e2.message}`);
+          logger.error(`[Pay-Bulk] Failed to send link: ${e2.message}`);
         }
       }
     }
@@ -1381,27 +1371,21 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
 
     req.session._msg = { type: 'success', text: 'Tagihan berhasil ditandai lunas.' };
 
-    // Kirim PDF bukti pelunasan ke WA pelanggan
+    // Kirim link bukti pelunasan ke WA pelanggan
     const pdfCustomer = customerSvc.getCustomerById(inv.customer_id);
     if (pdfCustomer && pdfCustomer.phone) {
       try {
-        const pdfPath = path.join(__dirname, '..', 'tmp', `receipt-${req.params.id}.pdf`);
-        logger.info(`[Pay-Single] Generating PDF at ${pdfPath}`);
-        await receiptPdf.generateReceipt(req.params.id, pdfPath);
-        if (fs.existsSync(pdfPath)) {
-          const { sendWhatsAppMedia } = await import('../services/evolutionService.js');
-          const caption = `Yth. ${pdfCustomer.name},\n\nTerima kasih atas pembayaran Anda.\n\nBerikut bukti pelunasan tagihan ZYA NET.`;
-          const waResult = await sendWhatsAppMedia(pdfCustomer.phone, pdfPath, caption);
-          if (waResult.success) {
-            logger.info(`[Pay-Single] PDF receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
-          } else {
-            logger.error(`[Pay-Single] PDF receipt FAILED: ${waResult.error}`);
-            const { enqueue } = require('../services/waQueueService');
-            enqueue(pdfCustomer.phone, pdfPath, caption);
-          }
+        const { sendWhatsAppText } = await import('../services/evolutionService.js');
+        const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${req.params.id}`;
+        const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+        const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
+        if (waResult.success) {
+          logger.info(`[Pay-Single] Link receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
+        } else {
+          logger.error(`[Pay-Single] Link receipt FAILED: ${waResult.error}`);
         }
       } catch (e2) {
-        logger.error(`[Pay-Single] Failed to send PDF: ${e2.message}`);
+        logger.error(`[Pay-Single] Failed to send link: ${e2.message}`);
       }
     }
   } catch (e) {

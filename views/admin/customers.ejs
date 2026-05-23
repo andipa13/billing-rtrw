@@ -75,7 +75,6 @@
             <tr>
               <th>#</th>
               <th><a href="/admin/customers?sort=customer_code&dir=<%= (sort==='customer_code' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">ID Pelanggan<% if (sort === 'customer_code') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
-              <th><a href="/admin/customers?sort=id&dir=<%= (sort==='id' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">ID<% if (sort === 'id') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
               <th><a href="/admin/customers?sort=name&dir=<%= (sort==='name' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Nama<% if (sort === 'name') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
               <th><a href="/admin/customers?sort=phone&dir=<%= (sort==='phone' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Telepon / Tag ONU<% if (sort === 'phone') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
               <th><a href="/admin/customers?sort=package_name&dir=<%= (sort==='package_name' && dir==='asc') ? 'desc' : 'asc' %><%= search ? '&search='+encodeURIComponent(search) : '' %><%= filterStatus ? '&status='+filterStatus : '' %>" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">Paket<% if (sort === 'package_name') { %><i class="bi bi-sort-<%= dir === 'asc' ? 'up' : 'down' %>"></i><% } else { %><i class="bi bi-filter" style="opacity:.4"></i><% } %></a></th>
@@ -88,13 +87,12 @@
           </thead>
           <tbody>
           <% if (customers.length === 0) { %>
-            <tr><td colspan="10" class="text-center text-muted" style="padding:32px"><%= t('admin.customers.empty', 'Belum ada pelanggan') %></td></tr>
+            <tr><td colspan="9" class="text-center text-muted" style="padding:32px"><%= t('admin.customers.empty', 'Belum ada pelanggan') %></td></tr>
           <% } %>
           <% customers.forEach((c, i) => { %>
             <tr>
               <td class="text-muted" style="font-size:12px"><%= i+1 %></td>
               <td class="fw6" style="color:var(--primary);font-size:13px"><%= c.customer_code || '-' %></td>
-              <td class="fw6" style="color:var(--primary)"><%= c.id %></td>
               <td class="fw6"><%= c.name %></td>
               <td>
                 <div><%= formatPhone(c.phone) %></div>
@@ -886,6 +884,21 @@ loadPppoeAdd();
 loadPppoeEdit();
 loadMikrotikProfiles();
 
+// Live search: auto-submit setelah ketik 800ms + auto-focus setelah reload
+(function(){
+  const searchInput = document.querySelector("input[name=search]");
+  if(!searchInput) return;
+  let timer;
+  searchInput.addEventListener("input", function(){
+    clearTimeout(timer);
+    timer = setTimeout(()=>{ this.form.submit(); }, 800);
+  });
+  // Auto-focus kembali ke search jika ada value (baru reload dari search)
+  if(searchInput.value) {
+    searchInput.focus();
+    searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+  }
+})();
 setTimeout(()=>document.querySelectorAll('.alert').forEach(a=>a.style.display='none'),4000);
 </script>
 </body>

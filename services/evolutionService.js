@@ -85,4 +85,18 @@ async function sendWhatsAppMedia(phone, filePath, caption = '') {
   }
 }
 
-module.exports = { sendWhatsApp, sendWhatsAppMedia };
+module.exports = { sendWhatsApp, sendWhatsAppMedia, sendWhatsAppText };
+
+async function sendWhatsAppText(phone, text) {
+  const settings = getSettings();
+  if (!settings.wa_evolution_enabled) return { success: false, error: 'WA disabled' };
+  const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
+  const apikey = settings.wa_evolution_api_key;
+  const number = phone.startsWith('62') ? phone : '62' + phone.replace(/^0/, '');
+  try {
+    const res = await axios.post(url, { number, text }, { headers: { apikey }, timeout: 15000 });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, error: err.response?.data || err.message };
+  }
+}

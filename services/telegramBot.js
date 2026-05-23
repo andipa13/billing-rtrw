@@ -144,17 +144,33 @@ function initTelegram() {
       });
     }
 
-    else if (data === 'menu_vouch') {
-      bot.sendMessage(chatId, '🎫 *MANAJEMEN VOUCHER*\nPilih aksi:', {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '➕ Buat Voucher Baru', callback_data: 'vouch_create' }],
-            [{ text: '📜 Daftar Hotspot Profile', callback_data: 'vouch_profiles' }],
-            [{ text: '⬅️ Kembali', callback_data: 'menu_main' }]
-          ]
+    else if (data === 'menu_vouch' || data === 'vouch_create') {
+      // vouch_create langsung tampilkan daftar paket untuk dipilih
+      try {
+        const profiles = await mikrotikSvc.getHotspotUserProfiles();
+        const buttons = [];
+        const filtered = profiles.filter(p => parseMikhmon(p.onLogin));
+
+        if (filtered.length === 0) {
+          return bot.sendMessage(chatId, '⚠️ Tidak ditemukan paket voucher.\nPastikan profil hotspot memiliki format Mikhmon di on-login script.', {
+            reply_markup: { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu_main' }]] }
+          });
         }
-      });
+
+        filtered.forEach((p, index) => {
+          const meta = parseMikhmon(p.onLogin);
+          if (index % 2 === 0) buttons.push([]);
+          buttons[buttons.length - 1].push({ text: `🎫 ${p.name} (${meta.validity})`, callback_data: `vouch_gen:${p.name}` });
+        });
+        buttons.push([{ text: '⬅️ Kembali', callback_data: 'menu_main' }]);
+
+        bot.sendMessage(chatId, '🎫 *BUAT VOUCHER*\nPilih paket untuk generate PIN:', {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: buttons }
+        });
+      } catch (e) {
+        bot.sendMessage(chatId, '❌ Error: ' + e.message);
+      }
     }
     
     else if (data === 'menu_mt') {
@@ -452,7 +468,7 @@ function initTelegram() {
   });
 
   bot.on('polling_error', (error) => {
-    logger.error('Telegram Polling Error:', error.message);
+    logger.error('Telegram Polling Error:', error.code || error.message || JSON.stringify(error));
   });
 }
 
