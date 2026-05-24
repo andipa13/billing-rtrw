@@ -294,7 +294,8 @@ function startCronJobs() {
           // Add subtle variation untuk menghindari spam detection
           formattedMsg = addMessageVariation(formattedMsg, i);
 
-          const ok = await sendWA(c.phone, formattedMsg);
+          const result = await sendWA(c.phone, formattedMsg);
+          const ok = result && result.success === true;
           if (ok) {
             sent++;
             targetCount++;
@@ -328,6 +329,13 @@ function startCronJobs() {
           if (attemptCount >= maxAttempts) {
             logger.warn(`[CRON] Max attempts tercapai untuk ${c.phone}`);
             failed++;
+
+            // Simpan ke pending_notifications untuk auto-retry
+            try {
+              const db = require('./config/database');
+              db.prepare('INSERT INTO pending_notifications (customer_id, type, phone, message, retry_count, max_retries, error, next_retry_at) VALUES (?, ?, ?, ?, 0, 5, ?, datetime("now", "+1 hour"))').run(c.id, 'h1_reminder', c.phone, formattedMsg, errorMsg);
+              logger.info('[CRON] Disimpan ke pending_notifications untuk retry otomatis: ' + c.name);
+            } catch (dbErr) { logger.error('[CRON] Gagal simpan pending: ' + dbErr.message); }
           } else {
             // Exponential backoff untuk retry
             const backoffDelay = getBackoffDelay(attemptCount);
@@ -507,5 +515,67 @@ function startCronJobs() {
 
   logger.info('[CRON] Semua tugas penjadwalan telah aktif.');
 }
+
+
+// ============================================================
+// CRON: Retry pending notifications setiap jam (menit ke-30)
+// ============================================================
+cron.schedule("30 * * * *", async () => {
+  const db = require("./config/database");
+  let sendWA;
+  try {
+    const mod = await import("./evolutionService.js");
+    sendWA = mod.sendWhatsApp;
+  } catch (e) {
+    logger.error("[RETRY-CRON] Gagal load WA module: " + e.message);
+    return;
+  }
+
+  const pending = db.prepare(
+    "SELECT * FROM pending_notifications WHERE retry_count < max_retries AND (next_retry_at IS NULL OR next_retry_at <= datetime('now', '+8 hours')) ORDER BY created_at ASC LIMIT 10"
+  ).all();
+
+  if (pending.length === 0) return;
+
+  logger.info("[RETRY-CRON] Memproses " + pending.length + " notifikasi pending...");
+  let retried = 0, success = 0, stillFailed = 0;
+
+  for (const p of pending) {
+    retried++;
+    await new Promise(r => setTimeout(r, 60000));
+
+    const result = await sendWA(p.phone, p.message);
+    if (result && result.success === true) {
+      db.prepare("DELETE FROM pending_notifications WHERE id = ?").run(p.id);
+      try {
+        db.prepare("INSERT INTO notification_log (customer_id, type, status, sent_at, created_at) VALUES (?, ?, 'sent', datetime('now', '+8 hours'), datetime('now', '+8 hours'))").run(p.customer_id, p.type);
+      } catch(e) {}
+      success++;
+      logger.info("[RETRY-CRON] Berhasil kirim ulang ke " + p.phone);
+    } else {
+      const newRetry = p.retry_count + 1;
+      const errMsg = (result && result.error) || "unknown";
+      if (newRetry >= p.max_retries) {
+        db.prepare("UPDATE pending_notifications SET retry_count = ?, error = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?").run(newRetry, errMsg, p.id);
+        logger.warn("[RETRY-CRON] Max retries untuk " + p.phone);
+      } else {
+        db.prepare("UPDATE pending_notifications SET retry_count = ?, error = ?, next_retry_at = datetime('now', '+1 hour', '+8 hours'), updated_at = datetime('now', '+8 hours') WHERE id = ?").run(newRetry, errMsg, p.id);
+      }
+      stillFailed++;
+    }
+  }
+
+  logger.info("[RETRY-CRON] Selesai: " + retried + " diproses, " + success + " berhasil, " + stillFailed + " masih gagal");
+
+  if (success > 0) {
+    try {
+      const adminPhones = String(getSetting("whatsapp_admin_numbers", "") || "").split(",").map(s => s.trim()).filter(Boolean);
+      const msg = "Retry Notifikasi: " + success + " pesan berhasil dikirim ulang, " + stillFailed + " masih gagal. (auto-retry cron)";
+      for (const ph of adminPhones) {
+        try { await sendWA(ph, msg); } catch(e) {}
+      }
+    } catch(e) {}
+  }
+});
 
 module.exports = { startCronJobs };

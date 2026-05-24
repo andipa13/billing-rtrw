@@ -886,7 +886,7 @@
                         <h6 class="mb-2"><i class="bi bi-shield-lock"></i><%= t('customer.wifi.change_password', 'Ganti Password WiFi') %></h6>
                         <form method="POST" action="/customer/change-password" class="row g-2 align-items-center">
                           <div class="col-12 col-md-8 mb-2 mb-md-0">
-                            <input type="password" class="form-control" name="password" placeholder="<%= t('customer.wifi.new_password_placeholder', 'Password baru') %>" required maxlength="32" minlength="8" autocomplete="new-password">
+                            <input type="text" class="form-control" name="new_wifi_pass" placeholder="<%= t('customer.wifi.new_password_placeholder', 'Password baru') %>" required maxlength="32" minlength="8" autocomplete="off" data-lpignore="true" data-form-type="other">
                           </div>
                           <div class="col-12 col-md-4">
                             <button class="btn btn-action btn-password w-100" type="submit">

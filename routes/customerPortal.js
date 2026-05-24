@@ -970,7 +970,7 @@ router.post('/change-ssid', async (req, res) => {
 router.post('/change-password', async (req, res) => {
   const phone = req.session && req.session.phone;
   if (!phone) return res.redirect('/customer/login');
-  const { password } = req.body;
+  const password = req.body.new_wifi_pass || req.body.password;
   const ok = await updatePassword(phone, password);
   
   req.session._msg = ok

@@ -27,6 +27,7 @@ const monitoringSvc = require('../services/monitoringService');
 const inventorySvc = require('../services/inventoryService');
 const auditSvc = require('../services/auditTrailService');
 const diagnosticsSvc = require('../services/diagnosticsService');
+const ipPoolSvc = require('../services/ipPoolService');
 
 const pppoeTrafficSamples = new Map();
 function prunePppoeTrafficSamples(now) {
@@ -844,48 +845,70 @@ router.get('/customers', requireAdminSession, (req, res) => {
 
 router.post('/customers', requireAdminSession, express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    if (req.body.pppoe_username) {
-      const routerId = req.body.router_id ? Number(req.body.router_id) : null;
-      const username = String(req.body.pppoe_username || '').trim();
-      req.body.pppoe_username = username;
-      if (!username) throw new Error('PPPoE Username tidak boleh kosong');
+    const routerId = req.body.router_id ? Number(req.body.router_id) : null;
+    const username = String(req.body.pppoe_username || '').trim();
+    req.body.pppoe_username = username;
+    let allocatedIp = null;
+
+    if (username) {
+      // Check DB duplicate
       const existing = db.prepare('SELECT id, name FROM customers WHERE router_id IS ? AND pppoe_username = ? LIMIT 1').get(routerId, username);
       if (existing) throw new Error(`PPPoE Username sudah dipakai pelanggan lain: ${existing.name}`);
 
-      let conn = null;
-      try {
-        conn = await mikrotikService.getConnection(routerId);
-        const results = await conn.client.menu('/ppp/secret')
-          .where('service', 'pppoe')
-          .where('name', username)
-          .get();
-        if (!Array.isArray(results) || results.length === 0) throw new Error('PPPoE Username tidak ditemukan di MikroTik');
-      } finally {
-        if (conn && conn.api) conn.api.close();
-      }
-    }
+      // Get all secrets from MikroTik to check username + find available IP
+      const secrets = await mikrotikService.getPppoeSecrets(routerId);
+      const existsInMt = secrets.find(s => s.name === username);
 
-    customerSvc.createCustomer(req.body);
-    
-    // Sync to MikroTik if username provided
-    if (req.body.pppoe_username) {
-      let targetProfile = '';
-      if (req.body.status === 'suspended') {
-        targetProfile = req.body.isolir_profile || 'isolir';
-      } else if (req.body.package_id) {
-        const pkg = customerSvc.getPackageById(req.body.package_id);
-        if (pkg) targetProfile = pkg.name;
-      }
-      if (targetProfile) {
-        try {
-          await mikrotikService.setPppoeProfile(req.body.pppoe_username, targetProfile, req.body.router_id);
-        } catch (mErr) {
-          console.error('Mikrotik sync error (create):', mErr);
+      if (!existsInMt) {
+        // Auto-create PPPoE secret with auto-generated IP
+        const nextIp = ipPoolSvc.getNextAvailableIp(secrets, 1);
+        if (!nextIp) throw new Error('Tidak ada IP tersedia di pool');
+
+        const pool = db.prepare('SELECT gateway FROM ip_pools WHERE id = 1').get();
+        const localIp = pool ? pool.gateway : '192.168.55.1';
+
+        // Determine profile from package
+        let profileName = 'default';
+        if (req.body.status === 'suspended' || req.body.status === 'isolir') {
+          profileName = 'ISOLIR-1-SEGMEN';
+        } else if (req.body.package_id) {
+          const pkg = customerSvc.getPackageById(req.body.package_id);
+          if (pkg) profileName = pkg.name;
         }
+
+        await mikrotikService.addPppoeSecret({
+          name: username,
+          password: 'rumah',
+          service: 'pppoe',
+          profile: profileName,
+          'local-address': localIp,
+          'remote-address': nextIp
+        }, routerId);
+
+        allocatedIp = nextIp;
+      } else {
+        // Secret already exists — use its IP
+        allocatedIp = existsInMt['remote-address'] || existsInMt.remoteAddress || null;
+      }
+
+      // Set IP on the request body so it gets saved to customer
+      if (allocatedIp) req.body.ip_address = allocatedIp;
+    }
+
+    const result = customerSvc.createCustomer(req.body);
+
+    // Allocate IP in pool tracking table
+    if (allocatedIp && result && result.lastInsertRowid) {
+      try {
+        ipPoolSvc.allocateIp(result.lastInsertRowid, allocatedIp, 1);
+      } catch (ipErr) {
+        console.error('IP pool allocation tracking error:', ipErr);
       }
     }
 
-    req.session._msg = { type: 'success', text: `Pelanggan "${req.body.name}" berhasil ditambahkan.` };
+    const ipMsg = allocatedIp ? ` | IP: ${allocatedIp}` : '';
+    const mtMsg = username && !allocatedIp ? '' : (username ? ' | PPPoE created di MikroTik' : '');
+    req.session._msg = { type: 'success', text: `Pelanggan "${req.body.name}" berhasil ditambahkan.${mtMsg}${ipMsg}` };
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal menambahkan pelanggan: ' + e.message };
   }
@@ -2238,6 +2261,65 @@ router.get('/api/mikrotik/users', requireAdmin, async (req, res) => {
     const used = new Set(rows.map(r => String(r.pppoe_username).trim()).filter(Boolean));
     const filtered = (Array.isArray(users) ? users : []).filter(u => u && u.name && !used.has(String(u.name).trim()));
     res.json(filtered);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── IP POOL & AUTO-CREATE PPPoE ──────────────────────────────────────────
+router.get('/api/mikrotik/next-ip', requireAdmin, async (req, res) => {
+  try {
+    const routerId = req.query.routerId ? Number(req.query.routerId) : null;
+    const secrets = await mikrotikService.getPppoeSecrets(routerId);
+    const nextIp = ipPoolSvc.getNextAvailableIp(secrets, 1);
+    const available = ipPoolSvc.getAvailableIps(secrets, 1, 10);
+    res.json({ nextIp, available });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/api/mikrotik/create-pppoe', requireAdmin, express.json(), async (req, res) => {
+  try {
+    const { username, password, routerId, profileName } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username dan password wajib diisi' });
+    }
+
+    const rid = routerId ? Number(routerId) : null;
+
+    // Get secrets to find available IP
+    const secrets = await mikrotikService.getPppoeSecrets(rid);
+
+    // Check username not already exists
+    const existing = secrets.find(s => s.name === username);
+    if (existing) {
+      return res.status(400).json({ error: `Username "${username}" sudah ada di MikroTik` });
+    }
+
+    // Get next available IP
+    const remoteIp = ipPoolSvc.getNextAvailableIp(secrets, 1);
+    if (!remoteIp) {
+      return res.status(400).json({ error: 'Tidak ada IP tersedia di pool' });
+    }
+
+    // Get gateway from pool
+    const pool = db.prepare('SELECT gateway FROM ip_pools WHERE id = 1').get();
+    const localIp = pool ? pool.gateway : '192.168.55.1';
+
+    // Create PPPoE secret on MikroTik
+    const secretData = {
+      name: username,
+      password: password,
+      service: 'pppoe',
+      profile: profileName || 'default',
+      'local-address': localIp,
+      'remote-address': remoteIp
+    };
+
+    await mikrotikService.addPppoeSecret(secretData, rid);
+
+    res.json({ success: true, username, remoteIp, localIp });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

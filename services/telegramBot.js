@@ -4,8 +4,11 @@ const { logger } = require('../config/logger');
 const customerSvc = require('./customerService');
 const billingSvc = require('./billingService');
 const mikrotikSvc = require('./mikrotikService');
+const ipPoolSvc = require('../services/ipPoolService');
+const db = require('../config/database');
 
 let bot = null;
+const addWizard = {}; // chatId -> wizard state
 
 function initTelegram() {
   const enabled = getSetting('telegram_enabled', false);
@@ -80,11 +83,158 @@ function initTelegram() {
 
   bot.on('message', async (msg) => {
     if (!isAdmin(msg)) return;
-    const text = msg.text;
-    if (text === '/start' || text === '/menu') return; // Handled by onText
-    
-    // Logika handle text manual jika diperlukan (misal untuk perintah kick/edit)
+    const text = (msg.text || '').trim();
+    const chatId = msg.chat.id;
+    if (!text || text.startsWith('/')) return; // Commands handled by onText
+
+    // ─── WIZARD HANDLER ─────────────────────────────────────────
+    const wiz = addWizard[chatId];
+    if (!wiz) return;
+
+    try {
+      if (wiz.step === 1) {
+        // Nama
+        wiz.data.name = text;
+        wiz.step = 2;
+        bot.sendMessage(chatId, `✅ Nama: *${text}*\n\n*Step 2/5* — Ketik *No. WA* pelanggan (08xx):`, { parse_mode: 'Markdown' });
+      } else if (wiz.step === 2) {
+        // WA number
+        let phone = text.replace(/[+\-.\s]/g, '').replace(/[^0-9]/g, '');
+        if (phone.length < 10) return bot.sendMessage(chatId, '⚠️ Nomor WA minimal 10 digit. Coba lagi:');
+        if (phone.startsWith('0')) phone = '62' + phone.slice(1);
+        else if (!phone.startsWith('62')) phone = '62' + phone;
+        wiz.data.phone = phone;
+        wiz.step = 3;
+        // Show packages
+        const packages = customerSvc.getAllPackages();
+        let pkgText = `✅ WA: *${phone}*\n\n*Step 3/5* — Pilih *Paket*:\n\n`;
+        packages.forEach((p, i) => { pkgText += `${i + 1}. ${p.name} — Rp ${Number(p.price).toLocaleString('id-ID')}\n`; });
+        pkgText += `\nKetik *nomor* paket:`;
+        bot.sendMessage(chatId, pkgText, { parse_mode: 'Markdown' });
+      } else if (wiz.step === 3) {
+        // Package selection
+        const packages = customerSvc.getAllPackages();
+        const idx = parseInt(text) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= packages.length) return bot.sendMessage(chatId, `⚠️ Pilih 1-${packages.length}:`);
+        wiz.data.package_id = packages[idx].id;
+        wiz.data.package_name = packages[idx].name;
+        wiz.step = 4;
+        bot.sendMessage(chatId, `✅ Paket: *${packages[idx].name}*\n\n*Step 4/5* — Ketik *PPPoE Username*:`, { parse_mode: 'Markdown' });
+      } else if (wiz.step === 4) {
+        // PPPoE username
+        const username = text.replace(/\s/g, '').toLowerCase();
+        if (!username) return bot.sendMessage(chatId, '⚠️ Username tidak boleh kosong:');
+        wiz.data.pppoe_username = username;
+        wiz.step = 5;
+        // Show routers
+        const routers = mikrotikSvc.getAllRouters();
+        if (routers.length <= 1) {
+          // Auto-skip router selection
+          wiz.data.router_id = routers.length === 1 ? routers[0].id : null;
+          wiz.step = 6;
+          await finishAddWizard(chatId);
+        } else {
+          let rText = `✅ PPPoE: *${username}*\n\n*Step 5/5* — Pilih *Router*:\n\n`;
+          routers.forEach((r, i) => { rText += `${i + 1}. ${r.name} (${r.host})\n`; });
+          rText += `\nKetik *nomor* router (atau \`skip\` untuk default):`;
+          bot.sendMessage(chatId, rText, { parse_mode: 'Markdown' });
+        }
+      } else if (wiz.step === 5) {
+        // Router selection
+        const routers = mikrotikSvc.getAllRouters();
+        if (text.toLowerCase() === 'skip' || text === '0') {
+          wiz.data.router_id = null;
+        } else {
+          const idx = parseInt(text) - 1;
+          if (isNaN(idx) || idx < 0 || idx >= routers.length) return bot.sendMessage(chatId, `⚠️ Pilih 1-${routers.length} atau ketik \`skip\`:`);
+          wiz.data.router_id = routers[idx].id;
+        }
+        wiz.step = 6;
+        await finishAddWizard(chatId);
+      }
+    } catch (e) {
+      bot.sendMessage(chatId, `❌ Error: ${e.message}`);
+      delete addWizard[chatId];
+    }
   });
+
+  async function finishAddWizard(chatId) {
+    const wiz = addWizard[chatId];
+    if (!wiz) return;
+    const d = wiz.data;
+    delete addWizard[chatId];
+
+    bot.sendMessage(chatId, '⏳ Membuat pelanggan & PPPoE di MikroTik...');
+
+    try {
+      const routerId = d.router_id || null;
+
+      // Check duplicate username in DB
+      const existing = db.prepare('SELECT id, name FROM customers WHERE pppoe_username = ? LIMIT 1').get(d.pppoe_username);
+      if (existing) throw new Error(`Username "${d.pppoe_username}" sudah dipakai: ${existing.name}`);
+
+      // Get MikroTik secrets + find available IP
+      const secrets = await mikrotikSvc.getPppoeSecrets(routerId);
+      const existsInMt = secrets.find(s => s.name === d.pppoe_username);
+
+      let allocatedIp = null;
+      if (!existsInMt) {
+        const nextIp = ipPoolSvc.getNextAvailableIp(secrets, 1);
+        if (!nextIp) throw new Error('Pool IP habis!');
+
+        const pool = db.prepare('SELECT gateway FROM ip_pools WHERE id = 1').get();
+        const localIp = pool ? pool.gateway : '192.168.55.1';
+
+        await mikrotikSvc.addPppoeSecret({
+          name: d.pppoe_username,
+          password: 'rumah',
+          service: 'pppoe',
+          profile: d.package_name || 'default',
+          'local-address': localIp,
+          'remote-address': nextIp
+        }, routerId);
+        allocatedIp = nextIp;
+      } else {
+        allocatedIp = existsInMt['remote-address'] || existsInMt.remoteAddress || null;
+      }
+
+      // Create customer in DB
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todayDay = new Date().getDate();
+      const result = customerSvc.createCustomer({
+        name: d.name,
+        phone: d.phone,
+        package_id: d.package_id,
+        pppoe_username: d.pppoe_username,
+        router_id: routerId,
+        status: 'active',
+        install_date: todayStr,
+        isolate_day: todayDay,
+        isolir_profile: 'ISOLIR-1-SEGMEN',
+        ip_address: allocatedIp,
+        connection_type: 'pppoe'
+      });
+
+      // Track IP allocation
+      if (allocatedIp && result && result.lastInsertRowid) {
+        try { ipPoolSvc.allocateIp(result.lastInsertRowid, allocatedIp, 1); } catch (e) {}
+      }
+
+      let msg = `✅ *PELANGGAN BERHASIL DITAMBAHKAN*\n\n`;
+      msg += `👤 Nama: *${d.name}*\n`;
+      msg += `📞 WA: ${d.phone}\n`;
+      msg += `📦 Paket: ${d.package_name}\n`;
+      msg += `🔑 PPPoE: \`${d.pppoe_username}\`\n`;
+      msg += `🌐 IP: \`${allocatedIp || '-'}\`\n`;
+      msg += `🔒 Password: \`rumah\`\n`;
+      msg += `📅 Install: ${todayStr}\n`;
+      msg += existsInMt ? `\n⚠️ Secret sudah ada di MikroTik, IP diambil dari sana.` : `\n✅ PPPoE secret berhasil dibuat di MikroTik.`;
+
+      bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+    } catch (e) {
+      bot.sendMessage(chatId, `❌ Gagal: ${e.message}`);
+    }
+  }
 
   // Callback Query Handling
   bot.on('callback_query', async (query) => {
@@ -122,6 +272,7 @@ function initTelegram() {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
+            [{ text: '➕ Tambah Pelanggan', callback_data: 'cust_add' }],
             [{ text: '🔍 Cari Pelanggan', callback_data: 'cust_search' }],
             [{ text: '🚫 Daftar Terisolir', callback_data: 'cust_suspended' }],
             [{ text: '📡 List ONU (GenieACS)', callback_data: 'cust_listonu' }],
@@ -284,6 +435,11 @@ function initTelegram() {
 
     else if (data === 'cust_search') {
       bot.sendMessage(chatId, '🔍 *CARI PELANGGAN*\nKetik perintah `/cari [nama/wa]`\n\nContoh: `/cari budi` atau `/cari 0812`', { parse_mode: 'Markdown' });
+    }
+
+    else if (data === 'cust_add') {
+      startAddWizard(chatId);
+      bot.answerCallbackQuery(query.id);
     }
 
     else if (data === 'cust_listonu') {
@@ -466,6 +622,20 @@ function initTelegram() {
     if (customers.length > 10) res += `_...dan ${customers.length - 10} lainnya._`;
     bot.sendMessage(msg.chat.id, res, { parse_mode: 'Markdown' });
   });
+
+  // ─── TAMBAH PELANGGAN WIZARD ─────────────────────────────────────────
+  bot.onText(/\/tambah/i, (msg) => {
+    if (!isAdmin(msg)) return;
+    startAddWizard(msg.chat.id);
+  });
+
+  function startAddWizard(chatId) {
+    addWizard[chatId] = { step: 1, data: {} };
+    bot.sendMessage(chatId, '➕ *TAMBAH PELANGGAN BARU*\n\nPPPoE + IP otomatis dibuat di MikroTik.\n\n*Step 1/5* — Ketik *Nama* pelanggan:', { parse_mode: 'Markdown' });
+  }
+
+  // Handle cust_add callback
+  // (inserted into callback_query handler below)
 
   bot.on('polling_error', (error) => {
     logger.error('Telegram Polling Error:', error.code || error.message || JSON.stringify(error));

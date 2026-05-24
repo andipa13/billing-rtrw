@@ -111,8 +111,8 @@ function createCustomer(data) {
   const phone = normalizePhone(data.phone);
   const customerCode = data.customer_code || generateCustomerCode();
   return db.prepare(`
-    INSERT INTO customers (name, phone, email, address, package_id, router_id, olt_id, odp_id, pon_port, lat, lng, genieacs_tag, pppoe_username, isolir_profile, status, install_date, notes, auto_isolate, isolate_day, connection_type, static_ip, mac_address, customer_code)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO customers (name, phone, email, address, package_id, router_id, olt_id, odp_id, pon_port, lat, lng, genieacs_tag, pppoe_username, isolir_profile, status, install_date, notes, auto_isolate, isolate_day, connection_type, static_ip, mac_address, customer_code, ip_address)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     data.name, phone, data.email || '', data.address || '',
     data.package_id ? parseInt(data.package_id) : null,
@@ -123,7 +123,7 @@ function createCustomer(data) {
     data.lat || '',
     data.lng || '',
     data.genieacs_tag || '', data.pppoe_username || '', 
-    data.isolir_profile || 'isolir',
+    data.isolir_profile || 'ISOLIR-1-SEGMEN',
     data.status || 'active',
     data.install_date || null, data.notes || '',
     data.auto_isolate !== undefined ? parseInt(data.auto_isolate) : 1,
@@ -131,7 +131,8 @@ function createCustomer(data) {
     data.connection_type || 'pppoe',
     data.static_ip || '',
     data.mac_address || '',
-    customerCode
+    customerCode,
+    data.ip_address || null
   );
 }
 
@@ -153,7 +154,7 @@ function updateCustomer(id, data) {
     data.lat || '',
     data.lng || '',
     data.genieacs_tag || '', data.pppoe_username || '', 
-    data.isolir_profile || 'isolir',
+    data.isolir_profile || 'ISOLIR-1-SEGMEN',
     data.status || 'active',
     data.install_date || null, data.notes || '',
     data.auto_isolate !== undefined ? parseInt(data.auto_isolate) : 1,
@@ -329,7 +330,7 @@ async function suspendCustomer(id) {
       isolate: true
     }, customer.router_id);
   } else if (customer.pppoe_username) {
-    const isolirProfile = customer.isolir_profile || 'isolir';
+    const isolirProfile = customer.isolir_profile || 'ISOLIR-1-SEGMEN';
     await mikrotikSvc.setPppoeProfile(customer.pppoe_username, isolirProfile, customer.router_id);
   }
   return true;
