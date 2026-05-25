@@ -150,7 +150,7 @@ function startCronJobs() {
       `📦 *Paket:* {{paket}}\n` +
       `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
       `📅 *Periode:* {{rincian}}\n\n` +
-      `Mohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
+      `🔑 *ID Login:* {{id}}\n\nMohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
       `Terima kasih atas kerja samanya.\n` +
       `Salam,\n` +
       `Admin ZYA NET`;
@@ -239,7 +239,7 @@ function startCronJobs() {
       `📦 *Paket:* {{paket}}\n` +
       `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
       `📅 *Periode:* {{rincian}}\n\n` +
-      `Mohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
+      `🔑 *ID Login:* {{id}}\n\nMohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
       `Terima kasih atas kerja samanya.\n` +
       `Salam,\nAdmin ${getSetting('company_header', 'ISP')}`;
     const template = String(getSetting('whatsapp_auto_billing_message', defaultTemplate) || defaultTemplate);
@@ -289,7 +289,8 @@ function startCronJobs() {
             .replace(/{{tagihan}}/gi, totalTagihan.toLocaleString('id-ID'))
             .replace(/{{rincian}}/gi, rincianBulan || '-')
             .replace(/{{paket}}/gi, c.package_name || '-')
-            .replace(/{{link}}/gi, loginLink);
+            .replace(/{{link}}/gi, loginLink)
+            .replace(/{{id}}/gi, c.customer_code || '-');
 
           // Add subtle variation untuk menghindari spam detection
           formattedMsg = addMessageVariation(formattedMsg, i);
