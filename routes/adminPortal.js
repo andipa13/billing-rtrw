@@ -1529,7 +1529,7 @@ const sendWA = sendWhatsApp;
     // Generate Link Login
     const protocol = req.protocol;
     const host = req.get('host');
-    const loginLink = `${protocol}://${host}/customer/login`;
+    const loginLink = `${protocol}://${host}/customer/dashboard`;
 
     const templateQris = `Yth. *{{nama}}*,\n\nTagihan internet Anda untuk periode *{{periode}}*.\n\n📦 *Paket:* {{paket}}\n💳 *Pembayaran QRIS (Semua E-Wallet)*\n💰 *Nominal (WAJIB tepat):* Rp {{qris_nominal}}\n🏷️ *Kode:* {{qris_kode}}\n{{qris_qr}}\n\nCatatan: nominal harus sama persis agar sistem dapat mendeteksi pembayaran.\n\nTerima kasih.\nSalam,\nAdmin ${getSetting('company_header', 'ISP')}`;
 
@@ -3266,7 +3266,7 @@ router.post('/whatsapp/broadcast', requireAdminSession, express.urlencoded({ ext
             // Generate Link Login
             const protocol = req.protocol;
             const host = req.get('host');
-            const loginLink = `${protocol}://${host}/customer/login`;
+            const loginLink = `${protocol}://${host}/customer/dashboard`;
 
             // Format Pesan dengan variation untuk menghindari spam detection
             let formattedMsg = message

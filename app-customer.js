@@ -371,10 +371,22 @@ if (getSetting('whatsapp_enabled', false)) {
     .catch((err) => logger.error('Gagal memulai WhatsApp bot:', err));
 }
 
-// Telegram bot - hanya 1 instance yang boleh polling
+// Telegram bot - webhook mode (more reliable than polling)
 if (getSetting('telegram_enabled', false)) {
-  const { initTelegram } = require('./services/telegramBot');
+  const { initTelegram, getBot } = require('./services/telegramBot');
   initTelegram();
+
+  // Webhook endpoint for Telegram
+  const tgToken = getSetting('telegram_bot_token', '');
+  if (tgToken) {
+    app.post('/api/telegram-webhook/' + tgToken, (req, res) => {
+      const bot = getBot();
+      if (bot) {
+        bot.processUpdate(req.body);
+      }
+      res.sendStatus(200);
+    });
+  }
 }
 
 // Mulai cron jobs (generate tagihan otomatis, dll)

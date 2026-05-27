@@ -16,7 +16,7 @@ function initTelegram() {
 
   if (!enabled || !token) {
     if (bot) {
-      bot.stopPolling();
+      bot.deleteWebHook().catch(() => {});
       bot = null;
       logger.info('Telegram Bot: Dihentikan (Nonaktif)');
     }
@@ -25,7 +25,7 @@ function initTelegram() {
 
   // Jika token berubah, kita harus stop bot lama dan buat baru
   if (bot && bot.token !== token) {
-    bot.stopPolling();
+    bot.deleteWebHook().catch(() => {});
     bot = null;
     logger.info('Telegram Bot: Token berubah, me-restart bot...');
   }
@@ -35,14 +35,15 @@ function initTelegram() {
     return; 
   }
 
-  bot = new TelegramBot(token, { polling: true });
+  bot = new TelegramBot(token, { polling: false });
   
-  // Clear webhook to ensure polling works (Sync)
-  bot.deleteWebHook().then(() => {
+  // Webhook mode
+  const webhookUrl = "https://billingzyandra.zyanet.cloud/api/telegram-webhook/" + token;
+  bot.setWebHook(webhookUrl).then(() => {
     bot.getMe().then(me => {
-      logger.info(`Telegram Bot: Terhubung sebagai @${me.username}`);
+      logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (webhook)`);
     }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
-  }).catch(e => logger.error('Telegram Bot Error (deleteWebHook):', e.message));
+  }).catch(e => logger.error('Telegram Bot Error (setWebHook):', e.message));
 
   // Middleware Admin Check (Fetch latest ID every time)
   const isAdmin = (msg) => {
@@ -295,8 +296,20 @@ function initTelegram() {
       });
     }
 
-    else if (data === 'menu_vouch' || data === 'vouch_create') {
-      // vouch_create langsung tampilkan daftar paket untuk dipilih
+    else if (data === 'menu_vouch') {
+      bot.sendMessage(chatId, '🎫 *MENU VOUCHER*\nPilih aksi:', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '➕ Buat Voucher', callback_data: 'vouch_create' }],
+            [{ text: '📝 List Belum Terpakai', callback_data: 'vouch_unused' }],
+            [{ text: '⬅️ Kembali', callback_data: 'menu_main' }]
+          ]
+        }
+      });
+    }
+
+    else if (data === 'vouch_create') {
       try {
         const profiles = await mikrotikSvc.getHotspotUserProfiles();
         const buttons = [];
@@ -304,7 +317,7 @@ function initTelegram() {
 
         if (filtered.length === 0) {
           return bot.sendMessage(chatId, '⚠️ Tidak ditemukan paket voucher.\nPastikan profil hotspot memiliki format Mikhmon di on-login script.', {
-            reply_markup: { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu_main' }]] }
+            reply_markup: { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu_vouch' }]] }
           });
         }
 
@@ -313,7 +326,7 @@ function initTelegram() {
           if (index % 2 === 0) buttons.push([]);
           buttons[buttons.length - 1].push({ text: `🎫 ${p.name} (${meta.validity})`, callback_data: `vouch_gen:${p.name}` });
         });
-        buttons.push([{ text: '⬅️ Kembali', callback_data: 'menu_main' }]);
+        buttons.push([{ text: '⬅️ Kembali', callback_data: 'menu_vouch' }]);
 
         bot.sendMessage(chatId, '🎫 *BUAT VOUCHER*\nPilih paket untuk generate PIN:', {
           parse_mode: 'Markdown',
@@ -323,8 +336,47 @@ function initTelegram() {
         bot.sendMessage(chatId, '❌ Error: ' + e.message);
       }
     }
-    
-    else if (data === 'menu_mt') {
+
+    else if (data === 'vouch_unused') {
+      try {
+        const allUsers = await mikrotikSvc.getHotspotUsers();
+        // Voucher = comment starts with "vc-" + uptime 0s/empty (belum pernah login)
+        const unused = allUsers.filter(u => (u.comment || '').startsWith('vc-') && (!u.uptime || u.uptime === '0s'));
+
+        if (unused.length === 0) {
+          return bot.sendMessage(chatId, '✅ Semua voucher sudah terpakai!', {
+            reply_markup: { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu_vouch' }]] }
+          });
+        }
+
+        // Group by profile
+        const grouped = {};
+        unused.forEach(v => {
+          const p = v.profile || 'default';
+          if (!grouped[p]) grouped[p] = [];
+          grouped[p].push(v);
+        });
+
+        let msg = `📝 *VOUCHER BELUM TERPAKAI* (${unused.length} total)\n\n`;
+        for (const [profile, vouchers] of Object.entries(grouped)) {
+          msg += `*${profile}* — ${vouchers.length} pcs\n`;
+          msg += `\`\`\`\n`;
+          vouchers.forEach(v => {
+            msg += `${v.name}\n`;
+          });
+          msg += `\`\`\`\n`;
+        }
+
+        bot.sendMessage(chatId, msg, {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu_vouch' }]] }
+        });
+      } catch (e) {
+        bot.sendMessage(chatId, '❌ Error: ' + e.message);
+      }
+    }
+
+        else if (data === 'menu_mt') {
       bot.sendMessage(chatId, '⚙️ *STATUS MIKROTIK*\nPilih data:', {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -637,10 +689,8 @@ function initTelegram() {
   // Handle cust_add callback
   // (inserted into callback_query handler below)
 
-  bot.on('polling_error', (error) => {
-    logger.error('Telegram Polling Error:', error.code || error.message || JSON.stringify(error));
-  });
+
 }
 
 // Export for manual re-init from settings
-module.exports = { initTelegram };
+module.exports = { initTelegram, getBot: () => bot };

@@ -131,7 +131,7 @@ function startCronJobs() {
       return withPort.replace(/\/+$/, '');
     };
 
-    const loginLink = `${resolveBaseUrl()}/customer/dashboard`;
+    const loginLink = `${resolveBaseUrl()}/customer/login`;
     const baseDelayMs = (Number(getSetting('whatsapp_broadcast_delay', 5) || 5) * 1000); // Default 5 detik
     const batchSize = 15; // 15 pesan per batch (dari 20)
     const batchPauseMs = 120000; // Pause 2 menit setelah batch (dari 1 menit)
@@ -146,13 +146,14 @@ function startCronJobs() {
     let batchCount = 0;
 
     const defaultTemplate =
-      `⚠️ *PENGINGAT PEMBAYARAN*\n\n` +
-      `Yth. Pelanggan ZYA NET,\n` +
-      `Tagihan Anda akan jatuh tempo. Segera lakukan pembayaran untuk menghindari isolir.\n\n` +
-      `📅 *Tgl Isolir:* {{tgl_isolir}}\n` +
-      `🔑 *ID Login:* {{id}}\n\n` +
-      `Bayar di sini:\nhttps://billingzyandra.zyanet.cloud/customer/dashboard\n\n` +
-      `*ZYA NET* 🌐`;
+      `Ini adalah pengingat sebelum tanggal jatuh tempo/isolir.\n\n` +
+      `📦 *Paket:* {{paket}}\n` +
+      `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
+      `📅 *Periode:* {{rincian}}\n\n` +
+      `Mohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
+      `Terima kasih atas kerja samanya.\n` +
+      `Salam,\n` +
+      `Admin ZYA NET`;
 
     for (const c of customers) {
         // ... (sisanya tidak berubah) ...
@@ -219,7 +220,7 @@ function startCronJobs() {
       return withPort.replace(/\/+$/, '');
     };
 
-    const loginLink = `${resolveBaseUrl()}/customer/dashboard`;
+    const loginLink = `${resolveBaseUrl()}/customer/login`;
     const baseDelayMs = (Number(getSetting('whatsapp_broadcast_delay', 5) || 5) * 1000); // Default 5 detik
     const batchSize = 15; // 15 pesan per batch (dari 20)
     const batchPauseMs = 120000; // Pause 2 menit setelah batch (dari 1 menit)
@@ -234,13 +235,13 @@ function startCronJobs() {
     let batchCount = 0;
 
     const defaultTemplate =
-      `⚠️ *PENGINGAT PEMBAYARAN*\n\n` +
-      `Yth. Pelanggan ZYA NET,\n` +
-      `Tagihan Anda akan jatuh tempo. Segera lakukan pembayaran untuk menghindari isolir.\n\n` +
-      `📅 *Tgl Isolir:* {{tgl_isolir}}\n` +
-      `🔑 *ID Login:* {{id}}\n\n` +
-      `Bayar di sini:\nhttps://billingzyandra.zyanet.cloud/customer/dashboard\n\n` +
-      `*ZYA NET* 🌐`;
+      `Ini adalah pengingat sebelum tanggal jatuh tempo/isolir.\n\n` +
+      `📦 *Paket:* {{paket}}\n` +
+      `💰 *Total Tagihan:* Rp {{tagihan}}\n` +
+      `📅 *Periode:* {{rincian}}\n\n` +
+      `Mohon segera melakukan pembayaran melalui portal pelanggan: {{link}}\n\n` +
+      `Terima kasih atas kerja samanya.\n` +
+      `Salam,\nAdmin ${getSetting('company_header', 'ISP')}`;
     const template = String(getSetting('whatsapp_auto_billing_message', defaultTemplate) || defaultTemplate);
 
     // Filter pelanggan yang perlu diingatkan
@@ -283,15 +284,12 @@ function startCronJobs() {
           const rincianBulan = unpaidInvoices.map(inv => `${inv.period_month}/${inv.period_year}`).join(', ');
 
           // Format pesan dengan variation untuk anti-spam
-          const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 10) || 10) || 10;
           let formattedMsg = template
             .replace(/{{nama}}/gi, c.name || 'Pelanggan')
             .replace(/{{tagihan}}/gi, totalTagihan.toLocaleString('id-ID'))
             .replace(/{{rincian}}/gi, rincianBulan || '-')
             .replace(/{{paket}}/gi, c.package_name || '-')
-            .replace(/{{link}}/gi, loginLink)
-            .replace(/{{tgl_isolir}}/gi, String(dueDay))
-            .replace(/{{id}}/gi, c.customer_code || '-');
+            .replace(/{{link}}/gi, loginLink);
 
           // Add subtle variation untuk menghindari spam detection
           formattedMsg = addMessageVariation(formattedMsg, i);
