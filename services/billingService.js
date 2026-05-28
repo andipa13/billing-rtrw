@@ -303,6 +303,7 @@ function getAllInvoices({ month, year, status = 'unpaid', search, limit = 300 } 
   if (month)  { q += ' AND i.period_month=?'; params.push(parseInt(month)); }
   if (year)   { q += ' AND i.period_year=?';  params.push(parseInt(year)); }
   if (status && status !== 'all') { q += ' AND i.status=?'; params.push(status); }
+  if (status === 'unpaid') { q += ' AND c.auto_isolate = 1'; }
   if (search) {
     q += ' AND (c.name LIKE ? OR c.phone LIKE ? OR c.genieacs_tag LIKE ?)';
     const s = `%${search}%`;
@@ -364,6 +365,17 @@ function markAsPaid(invoiceId, paidByName, notes, actor = null) {
     }
   }
 
+
+  // Jika semua invoice lunas, re-enable auto_isolate
+  if (result.changes > 0) {
+    const invRow2 = db.prepare("SELECT customer_id FROM invoices WHERE id=?").get(invoiceId);
+    if (invRow2) {
+      const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid'").get(invRow2.customer_id);
+      if (remaining && remaining.cnt === 0) {
+        db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(invRow2.customer_id);
+      }
+    }
+  }
   return result;
 }
 

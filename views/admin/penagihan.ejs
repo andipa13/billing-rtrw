@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Penagihan Lapangan | <%= company %></title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .summary-bar{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+    .summary-bar .badge{font-size:0.9em;padding:8px 14px}
+    .tbl-penagihan td{font-size:0.88em;vertical-align:middle}
+    .partial-badge{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px;font-size:0.8em}
+    .modal-backdrop{z-index:1040}.modal{z-index:1050}
+  </style>
+</head>
+<body>
+<%- include('partials/sidebar', { activePage: 'penagihan', company }) %>
+<div class="mw">
+<div class="topbar">
+  <div class="tb-title"><button class="hb-menu" onclick="toggleSidebar()"><i class="bi bi-list"></i></button><i class="bi bi-geo-alt"></i> Penagihan Lapangan</div>
+  <div class="tb-right">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light">
+      <i class="bi bi-moon-fill" id="themeIcon"></i>
+    </button>
+    <span class="adm-badge"><i class="bi bi-person-fill"></i> <%= (typeof session !== 'undefined' && session.isCashier) ? 'Kasir' : 'Admin' %></span>
+    <a href="/admin/logout" class="btn btn-g btn-sm"><i class="bi bi-box-arrow-left"></i></a>
+  </div>
+</div>
+<div class="page">
+
+<% if (msg) { %><div class="alert alert-s"><%= msg %></div><% } %>
+
+<div class="summary-bar">
+  <span class="badge" style="background:#e94560;color:#fff"><i class="bi bi-people"></i> <%= customers.length %> pelanggan</span>
+  <span class="badge" style="background:#ffc107;color:#333"><i class="bi bi-cash-stack"></i> Total Sisa: Rp <%= customers.reduce((s,c) => s + (c.sisa_tagihan || 0), 0).toLocaleString('id-ID') %></span>
+</div>
+
+<p style="color:var(--muted);font-size:0.85em;margin-bottom:12px">
+  <i class="bi bi-info-circle"></i> Daftar pelanggan aktif yang masih punya tagihan belum lunas. Jaringan <b>tidak diisolir</b>. Kasir bisa catat pembayaran sebagian.
+</p>
+
+<div class="table-responsive">
+<table class="table table-hover table-sm tbl-penagihan">
+<thead><tr>
+  <th>#</th><th>Pelanggan</th><th>Alamat</th><th>HP</th><th>Paket</th><th>Tagihan</th><th>Dibayar</th><th>Sisa</th><th>Aksi</th>
+</tr></thead>
+<tbody>
+<% customers.forEach((c, i) => { %>
+<tr>
+  <td><%= i+1 %></td>
+  <td><strong><%= c.name %></strong><br><small style="color:var(--muted)"><%= c.customer_code || '' %></small>
+    <% if (c.status === 'suspended') { %><span class="partial-badge">Suspended</span><% } %>
+  </td>
+  <td><%= c.address || '-' %></td>
+  <td><a href="tel:<%= (c.phone||'').replace(/[^0-9+]/g,'') %>"><%= c.phone || '-' %></a></td>
+  <td><%= c.package_name || '-' %></td>
+  <td>Rp <%= (c.total_tagihan || 0).toLocaleString('id-ID') %><br><small>(<%= c.unpaid_count %> inv, sejak <%= c.periode_awal %>)</small></td>
+  <td><% if (c.total_partial > 0) { %><span class="partial-badge"><i class="bi bi-check"></i> Rp <%= c.total_partial.toLocaleString('id-ID') %></span><% } else { %>-<% } %></td>
+  <td style="font-weight:700;color:#e94560">Rp <%= (c.sisa_tagihan || 0).toLocaleString('id-ID') %></td>
+  <td style="white-space:nowrap">
+    <button class="btn btn-sm btn-success" style="background:#28a745;color:#fff;border:none;margin-right:4px" onclick="showLunas('<%= c.id %>','<%= c.name.replace(/'/g,"\\'") %>','<%= c.invoice_ids %>',<%= c.sisa_tagihan %>)"><i class="bi bi-check2-all"></i></button>
+    <button class="btn btn-sm btn-p" onclick="showPay('<%= c.id %>','<%= c.name.replace(/'/g,"\\'") %>','<%= c.invoice_ids %>',<%= c.sisa_tagihan %>)"><i class="bi bi-cash"></i></button>
+    <a href="https://wa.me/<%= (c.phone||'').replace(/[^0-9]/g,'').replace(/^0/,'62') %>" target="_blank" class="btn btn-sm btn-g"><i class="bi bi-whatsapp"></i></a>
+  </td>
+</tr>
+<% }) %>
+</tbody>
+</table>
+</div>
+<% if (customers.length === 0) { %>
+<div style="text-align:center;padding:40px;color:var(--muted)"><i class="bi bi-check-circle" style="font-size:3em;color:#28a745"></i><p>Semua pelanggan sudah lunas!</p></div>
+<% } %>
+
+<!-- Modal -->
+<div class="modal" id="payModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1050;align-items:center;justify-content:center">
+<div style="background:var(--bg);border-radius:12px;padding:24px;max-width:400px;width:90%;margin:auto;margin-top:15vh">
+  <h4 style="margin-bottom:16px"><i class="bi bi-cash-coin"></i> Catat Pembayaran</h4>
+  <p>Pelanggan: <strong id="pm-name"></strong></p>
+  <p>Sisa: <strong id="pm-sisa" style="color:#e94560"></strong></p>
+  <input type="hidden" id="pm-inv">
+  <div style="margin-bottom:12px">
+    <label style="font-size:0.85em;font-weight:600">Jumlah Bayar (Rp)</label>
+    <input type="number" id="pm-amt" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" min="1000" step="1000" placeholder="50000">
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="font-size:0.85em;font-weight:600">Catatan (opsional)</label>
+    <input type="text" id="pm-note" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="bayar setengah">
+  </div>
+  <div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn btn-g btn-sm" onclick="closePay()">Batal</button>
+    <button class="btn btn-p btn-sm" onclick="submitPay()"><i class="bi bi-check-circle"></i> Simpan</button>
+  </div>
+</div>
+</div>
+<script>
+function showPay(id, name, invIds, sisa) {
+  document.getElementById('pm-name').textContent = name;
+  document.getElementById('pm-sisa').textContent = 'Rp ' + sisa.toLocaleString('id-ID');
+  document.getElementById('pm-inv').value = invIds.split(',')[0];
+  document.getElementById('pm-amt').value = '';
+  document.getElementById('pm-note').value = '';
+  document.getElementById('payModal').style.display = 'flex';
+}
+function closePay() { document.getElementById('payModal').style.display = 'none'; }
+async function submitPay() {
+  const invoiceId = Number(document.getElementById('pm-inv').value);
+  const amount = Number(document.getElementById('pm-amt').value);
+  const notes = document.getElementById('pm-note').value;
+  if (!amount || amount < 1000) { alert('Min Rp 1.000'); return; }
+  try {
+    const r = await fetch('/admin/penagihan/partial-pay', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Accept':'application/json'},
+      body: JSON.stringify({ invoice_id: invoiceId, amount, notes })
+    });
+    const d = await r.json();
+    if (d.ok) { alert(d.message); location.reload(); }
+    else { alert('Gagal: ' + (d.error || 'Error')); }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+function showLunas(id, name, invIds, sisa) {
+  document.getElementById('lm-name').textContent = name;
+  document.getElementById('lm-sisa').textContent = 'Rp ' + sisa.toLocaleString('id-ID');
+  document.getElementById('lm-inv').value = invIds;
+  document.getElementById('lm-amount').value = sisa;
+  document.getElementById('lm-note').value = '';
+  document.getElementById('lunasModal').style.display = 'flex';
+}
+function closeLunas() { document.getElementById('lunasModal').style.display = 'none'; }
+async function submitLunas() {
+  const invIds = document.getElementById('lm-inv').value.split(',');
+  const notes = document.getElementById('lm-note').value || 'Lunas penagihan';
+  try {
+    for (const invId of invIds) {
+      const r = await fetch('/admin/penagihan/lunas', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ invoice_id: Number(invId), notes })
+      });
+      const d = await r.json();
+      if (!d.ok) { alert('Gagal inv #' + invId + ': ' + d.error); return; }
+    }
+    alert('Semua tagihan berhasil dilunasi!');
+    location.reload();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+</script>
+</div></div>
+<!-- Modal Pelunasan -->
+<div class="modal" id="lunasModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1050;align-items:center;justify-content:center">
+<div style="background:var(--bg);border-radius:12px;padding:24px;max-width:400px;width:90%;margin:auto;margin-top:15vh">
+  <h4 style="margin-bottom:16px"><i class="bi bi-check2-all" style="color:#28a745"></i> Pelunasan</h4>
+  <p>Pelanggan: <strong id="lm-name"></strong></p>
+  <p>Total Sisa: <strong id="lm-sisa" style="color:#e94560"></strong></p>
+  <input type="hidden" id="lm-inv">
+  <input type="hidden" id="lm-amount">
+  <div style="margin-bottom:16px">
+    <label style="font-size:0.85em;font-weight:600">Catatan (opsional)</label>
+    <input type="text" id="lm-note" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="Lunas tunai">
+  </div>
+  <div style="background:#d4edda;border-radius:8px;padding:12px;margin-bottom:16px;font-size:0.85em">
+    <i class="bi bi-info-circle"></i> Semua tagihan ditandai <b>LUNAS</b>. Auto-isolir aktif kembali.
+  </div>
+  <div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn btn-g btn-sm" onclick="closeLunas()">Batal</button>
+    <button class="btn btn-sm" style="background:#28a745;color:#fff;border:none" onclick="submitLunas()"><i class="bi bi-check2-all"></i> Lunaskan Semua</button>
+  </div>
+</div>
+</div>
+</body></html>

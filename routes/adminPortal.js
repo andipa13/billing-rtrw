@@ -1099,7 +1099,15 @@ router.post('/customers/:id/unisolate', requireAdminSession, async (req, res) =>
   try {
     await customerSvc.activateCustomer(req.params.id);
     const customer = customerSvc.getCustomerById(req.params.id);
-    req.session._msg = { type: 'success', text: `Layanan pelanggan "${customer.name}" berhasil diaktifkan kembali.` };
+    // Cek apakah masih ada tagihan unpaid -> disable auto isolir agar masuk penagihan manual
+    const db = require('../config/database');
+    const unpaid = db.prepare('SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = ?').get(req.params.id, 'unpaid');
+    if (unpaid && unpaid.cnt > 0) {
+      db.prepare('UPDATE customers SET auto_isolate = 0 WHERE id = ?').run(req.params.id);
+      req.session._msg = { type: 'success', text: `Layanan "${customer.name}" aktif kembali. Auto-isolir DIMATIKAN (masuk daftar penagihan).` };
+    } else {
+      req.session._msg = { type: 'success', text: `Layanan pelanggan "${customer.name}" berhasil diaktifkan kembali.` };
+    }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal aktivasi: ' + e.message };
   }
@@ -3589,6 +3597,95 @@ router.get('/api/server-stats', requireAdmin, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+
+// ============ PENAGIHAN (Collection) ============
+router.get('/penagihan', requireAdminSession, (req, res) => {
+  const db = require('../config/database');
+  const customers = db.prepare(`
+    SELECT c.id, c.name, c.phone, c.address, c.customer_code, c.status,
+           p.name as package_name, p.price as package_price,
+           COUNT(i.id) as unpaid_count,
+           SUM(i.amount) as total_tagihan,
+           SUM(COALESCE(i.partial_paid, 0)) as total_partial,
+           SUM(i.amount) - SUM(COALESCE(i.partial_paid, 0)) as sisa_tagihan,
+           GROUP_CONCAT(i.id) as invoice_ids,
+           MIN(i.period_month || '/' || i.period_year) as periode_awal
+    FROM customers c
+    JOIN invoices i ON c.id = i.customer_id AND i.status = 'unpaid'
+    LEFT JOIN packages p ON c.package_id = p.id
+    WHERE c.status IN ('active', 'suspended')
+    GROUP BY c.id
+    ORDER BY sisa_tagihan DESC
+  `).all();
+
+  res.render('admin/penagihan', {
+    title: 'Penagihan Lapangan',
+    company: company(),
+    activePage: 'penagihan',
+    customers,
+    msg: flashMsg(req)
+  });
+});
+
+// Catat pembayaran sebagian
+router.post('/penagihan/partial-pay', requireAdminSession, express.json(), (req, res) => {
+  const db = require('../config/database');
+  const { invoice_id, amount, notes } = req.body;
+  if (!invoice_id || !amount || amount <= 0) {
+    return res.status(400).json({ ok: false, error: 'Data tidak valid' });
+  }
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice_id);
+  if (!inv) return res.status(404).json({ ok: false, error: 'Invoice tidak ditemukan' });
+
+  const currentPartial = inv.partial_paid || 0;
+  const newPartial = currentPartial + Number(amount);
+  const dateStr = new Date().toLocaleDateString('id-ID');
+  const amtStr = Number(amount).toLocaleString('id-ID');
+  const noteText = ' | Bayar sebagian Rp ' + amtStr + ' (' + dateStr + ')' + (notes ? ' - ' + notes : '');
+
+  if (newPartial >= inv.amount) {
+    // Lunas
+    db.prepare("UPDATE invoices SET status = 'paid', paid_at = datetime('now', '+8 hours'), partial_paid = ?, paid_by_name = 'Kasir Lapangan', notes = COALESCE(notes, '') || ? WHERE id = ?")
+      .run(inv.amount, noteText, invoice_id);
+    // Re-enable auto_isolate jika semua invoice lunas
+    const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);
+    if (remaining && remaining.cnt === 0) {
+      db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(inv.customer_id);
+    }
+    return res.json({ ok: true, message: 'Tagihan lunas!', lunas: true });
+  } else {
+    db.prepare("UPDATE invoices SET partial_paid = ?, notes = COALESCE(notes, '') || ? WHERE id = ?")
+      .run(newPartial, noteText, invoice_id);
+    const sisaStr = (inv.amount - newPartial).toLocaleString('id-ID');
+    return res.json({ ok: true, message: 'Tercatat Rp ' + amtStr + '. Sisa: Rp ' + sisaStr, lunas: false });
+  }
+});
+
+// Pelunasan penuh dari halaman penagihan
+router.post('/penagihan/lunas', requireAdminSession, express.json(), (req, res) => {
+  const db = require('../config/database');
+  const { invoice_id, notes } = req.body;
+  if (!invoice_id) return res.status(400).json({ ok: false, error: 'Invoice ID required' });
+
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice_id);
+  if (!inv) return res.status(404).json({ ok: false, error: 'Invoice tidak ditemukan' });
+  if (inv.status === 'paid') return res.json({ ok: true, message: 'Sudah lunas' });
+
+  const dateStr = new Date().toLocaleDateString('id-ID');
+  const noteText = ' | Pelunasan ' + dateStr + (notes ? ' - ' + notes : '');
+
+  db.prepare("UPDATE invoices SET status = 'paid', paid_at = datetime('now', '+8 hours'), partial_paid = amount, paid_by_name = 'Kasir Lapangan', notes = COALESCE(notes, '') || ? WHERE id = ?")
+    .run(noteText, invoice_id);
+
+  // Cek apakah semua invoice customer sudah lunas -> re-enable auto_isolate
+  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);
+  if (remaining && remaining.cnt === 0) {
+    db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(inv.customer_id);
+  }
+
+  return res.json({ ok: true, message: 'Invoice #' + invoice_id + ' lunas' });
 });
 
 module.exports = router;
