@@ -267,7 +267,7 @@ app.get('/isolated', (req, res) => {
   const { getSettingsWithCache } = require('./config/settingsManager');
   const settings = getSettingsWithCache();
   res.render('isolated', {
-    company: settings.company_header || 'My ISP',
+    company: settings.company_header || 'ZYA - NET',
     adminPhone: settings.company_phone || '',
     address: settings.company_address || ''
   });

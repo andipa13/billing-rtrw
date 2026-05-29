@@ -1193,7 +1193,7 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
         if (lastInv) {
           const { sendWhatsAppText } = await import('../services/evolutionService.js');
           const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastInv.id}`;
-          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
           const waResult = await sendWhatsAppText(freshCustomer.phone, text);
           if (waResult.success) {
             logger.info(`[Pay] Link receipt sent to ${freshCustomer.phone} (invoice ${lastInv.id})`);
@@ -1287,7 +1287,7 @@ router.get('/billing/:id/print', requireAdminSession, (req, res) => {
   res.render('admin/print_invoice', {
     invoice: inv,
     customer,
-    company: settings.company_header || 'ALIJAYA DIGITAL NETWORK',
+    company: settings.company_header || 'ZYA - NET',
     settings
   });
 });
@@ -1366,7 +1366,7 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
           const lastId = ids[ids.length - 1];
           const { sendWhatsAppText } = await import('../services/evolutionService.js');
           const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastId}`;
-          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+          const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
           const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
           if (waResult.success) {
             logger.info(`[Pay-Bulk] Link receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
@@ -1408,7 +1408,7 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
       try {
         const { sendWhatsAppText } = await import('../services/evolutionService.js');
         const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${req.params.id}`;
-        const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+        const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
         const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
         if (waResult.success) {
           logger.info(`[Pay-Single] Link receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
@@ -3381,7 +3381,7 @@ const sendWA = sendWhatsApp;
     const adminPhone = getSetting('company_phone', '6282234924646');
     const msg =
       `🧪 *TEST NOTIFIKASI WHATSAPP*\n\n` +
-      `✅ Jika pesan ini masuk, berarti notifikasi WhatsApp dari Billing Alijaya System sudah berfungsi.\n` +
+      `✅ Jika pesan ini masuk, berarti notifikasi WhatsApp dari ZYA - NET sudah berfungsi.\n` +
       `📅 Waktu: ${new Date().toLocaleString('id-ID')}`;
     const ok = await sendWA(adminPhone, msg);
     if (!ok) throw new Error('Gagal mengirim pesan test (sendWA=false).');

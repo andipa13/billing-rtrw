@@ -18,8 +18,9 @@ function getDeviceStatus(lastInform) {
     const now = Date.now();
     const lastInformTime = new Date(lastInform).getTime();
     const timeDiff = now - lastInformTime;
-    // Consider device online if last inform was within 5 minutes
-    return timeDiff < 5 * 60 * 1000;
+    // Consider device online if last inform was within 15 minutes
+    // (inform interval = 5 min, beri buffer 3x agar tidak flicker offline antar inform)
+    return timeDiff < 15 * 60 * 1000;
 }
 
 function formatUptime(uptimeValue) {

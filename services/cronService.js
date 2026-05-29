@@ -152,7 +152,8 @@ function startCronJobs() {
       `📅 *Tgl Isolir:* {{tgl_isolir}}\n` +
       `🔑 *ID Login:* {{id}}\n\n` +
       `Bayar di sini:\nhttps://billingzyandra.zyanet.cloud/customer/dashboard\n\n` +
-      `*ZYA NET* 🌐`;
+      `*ZYA - NET* 🌐\n` +
+      `_Internet Stabil & Unlimited_`;
 
     for (const c of customers) {
         // ... (sisanya tidak berubah) ...
@@ -240,7 +241,8 @@ function startCronJobs() {
       `📅 *Tgl Isolir:* {{tgl_isolir}}\n` +
       `🔑 *ID Login:* {{id}}\n\n` +
       `Bayar di sini:\nhttps://billingzyandra.zyanet.cloud/customer/dashboard\n\n` +
-      `*ZYA NET* 🌐`;
+      `*ZYA - NET* 🌐\n` +
+      `_Internet Stabil & Unlimited_`;
     const template = String(getSetting('whatsapp_auto_billing_message', defaultTemplate) || defaultTemplate);
 
     // Filter pelanggan yang perlu diingatkan

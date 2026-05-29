@@ -24,7 +24,7 @@ function sendPdfToWA(invoiceId, filePath) {
   const phone = invoice.phone.startsWith('62') ? invoice.phone : '62' + invoice.phone.replace(/^0/, '');
   const fileName = path.basename(filePath);
 
-  const text = `Terima kasih telah melakukan pembayaran.\n\nBukti pembayaran Invoice #${invoiceId} dapat diunduh di:\n${receiptUrl}\n\n_ZyaNet_`;
+  const text = `✅ *PEMBAYARAN DITERIMA*\n\nTerima kasih telah melakukan pembayaran.\n\n📋 Invoice: #${invoiceId}\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
 
   axios.post(url, {
     number: phone,
