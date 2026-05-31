@@ -436,6 +436,272 @@ router.get('/map', requireAdminSession, (req, res) => {
   });
 });
 
+// ─── LIVE NETWORK MONITOR ─────────────────────────────────────────────────
+router.get('/network-monitor', requireAdminSession, (req, res) => {
+  // No-cache headers supaya browser tidak pakai versi lama
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store'
+  });
+  res.render('admin/network-monitor', {
+    title: 'Live Network Monitor',
+    company: company(),
+    activePage: 'network-monitor',
+    msg: flashMsg(req),
+    settings: getSettings(),
+    hqLat: -5.3575,
+    hqLng: 120.0515
+  });
+});
+
+router.get('/api/network-topology', requireAdminSession, async (req, res) => {
+  try {
+    const customers = customerSvc.getAllCustomers();
+    const odps = odpSvc.getAllOdps();
+    const activeSessions = await mikrotikService.getPppoeActive();
+    const activeUsernames = new Set(activeSessions.map(s => {
+      const name = s.name || s['.name'] || s.user || '';
+      return name.toLowerCase();
+    }));
+
+    const nodes = [];
+    const edges = [];
+
+    // Router node (center)
+    nodes.push({ id: 'router', label: 'MikroTik\nRB5009', group: 'router', level: 0 });
+
+    // ODP nodes
+    odps.forEach(odp => {
+      const custCount = customers.filter(c => c.odp_id === odp.id).length;
+      const cap = odp.port_capacity || 16;
+      const pct = custCount / cap;
+      const odpGroup = pct >= 1 ? 'odp_full' : pct >= 0.7 ? 'odp_almost' : 'odp_ok';
+      nodes.push({
+        id: `odp-${odp.id}`, label: odp.name, group: odpGroup, level: 1,
+        odp_id: odp.id, lat: odp.lat ? Number(odp.lat) : null, lng: odp.lng ? Number(odp.lng) : null,
+        port_capacity: cap, used_ports: custCount,
+        locked: odp.locked ? true : false,
+        parent_odp_id: odp.parent_odp_id || null,
+        cable_path: odp.cable_path ? (() => { try { return JSON.parse(odp.cable_path); } catch(e) { return null; } })() : null
+      });
+      // ODP connects to parent ODP if set, else to router
+      const odpParent = odp.parent_odp_id ? `odp-${odp.parent_odp_id}` : 'router';
+      edges.push({ from: odpParent, to: `odp-${odp.id}` });
+    });
+
+    // Customer nodes
+    let onlineCount = 0;
+    customers.forEach(c => {
+      if (!c.pppoe_username) return;
+      const online = activeUsernames.has(c.pppoe_username.toLowerCase());
+      if (online) onlineCount++;
+      const group = c.status === 'suspended' ? 'suspended' : (online ? 'online' : 'offline');
+      const nodeData = { id: `c-${c.id}`, label: c.name, group, level: 2, pppoe: c.pppoe_username };
+      if (c.lat && Number(c.lat) !== 0) { nodeData.lat = Number(c.lat); nodeData.lng = Number(c.lng || 0); }
+      nodeData.cust_id = c.id;
+      nodeData.package = c.package_name || '';
+      nodeData.address = c.address || '';
+      nodeData.phone = c.phone || '';
+      nodeData.locked = c.locked ? true : false;
+      nodeData.cable_path = c.cable_path ? JSON.parse(c.cable_path) : null;
+      const parentOdp = c.odp_id ? `odp-${c.odp_id}` : 'router';
+      nodes.push(nodeData);
+      edges.push({ from: parentOdp, to: `c-${c.id}` });
+    });
+
+    res.json({
+      ok: true,
+      nodes,
+      edges,
+      stats: {
+        total: customers.filter(c => c.pppoe_username).length,
+        online: onlineCount,
+        offline: customers.filter(c => c.pppoe_username && c.status === 'active').length - onlineCount,
+        suspended: customers.filter(c => c.status === 'suspended').length
+      }
+    });
+  } catch (err) {
+    logger.error('[network-topology]', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── System stats for network monitor HUD ──
+router.get('/api/system-stats', requireAdminSession, (req, res) => {
+  try {
+    const fs = require('fs');
+    // CPU: simple load avg snapshot
+    const load = require('os').loadavg()[0];
+    const cpus = require('os').cpus().length;
+    const cpu = Math.round((load / cpus) * 100);
+    // RAM
+    const totalMem = require('os').totalmem();
+    const freeMem = require('os').freemem();
+    const ram = Math.round(((totalMem - freeMem) / totalMem) * 100);
+    // Disk
+    let disk = 0;
+    try {
+      const diskOut = require('child_process').execSync("df / | tail -1 | awk '{print $5}'").toString().trim();
+      disk = parseInt(diskOut) || 0;
+    } catch(e) {}
+    // Temp
+    let temp = '--';
+    try {
+      const raw = require('fs').readFileSync('/sys/class/thermal/thermal_zone0/temp','utf8').trim();
+      temp = Math.round(parseInt(raw) / 1000);
+    } catch(e) {}
+    res.json({ cpu, ram, disk, temp });
+  } catch(e) { res.json({ cpu: 0, ram: 0, disk: 0, temp: '--' }); }
+});
+
+const nmParser = express.json();
+
+// Assign client to ODP (parent)
+router.post('/api/nm/assign-client', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { customer_id, odp_id } = req.body;
+    if (!customer_id) return res.status(400).json({ ok: false });
+    db.prepare('UPDATE customers SET odp_id=? WHERE id=?').run(odp_id || null, customer_id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Assign ODP parent (ODP -> ODP chaining)
+router.post('/api/nm/assign-odp-parent', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { odp_id, parent_odp_id } = req.body;
+    if (!odp_id) return res.status(400).json({ ok: false });
+    // prevent self-parent
+    if (Number(parent_odp_id) === Number(odp_id)) return res.status(400).json({ ok: false, error: 'self_parent' });
+    db.prepare('UPDATE odps SET parent_odp_id=? WHERE id=?').run(parent_odp_id || null, odp_id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Add ODP from map (JSON) — place at clicked coordinates
+router.post('/api/nm/add-odp', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { name, lat, lng, port_capacity, parent_odp_id } = req.body;
+    if (!name || !String(name).trim()) return res.status(400).json({ ok: false, error: 'name_required' });
+    const cleanName = String(name).trim();
+    // Dedup guard: reject identical name created within last 10s (double-submit protection)
+    const dup = db.prepare("SELECT id FROM odps WHERE name=? AND created_at >= datetime('now','-10 seconds')").get(cleanName);
+    if (dup) return res.json({ ok: true, id: dup.id, deduped: true });
+    const result = odpSvc.createOdp({
+      name: cleanName,
+      lat: lat != null ? String(lat) : '',
+      lng: lng != null ? String(lng) : '',
+      port_capacity: port_capacity || 16,
+      description: ''
+    });
+    const newId = result.lastInsertRowid;
+    if (parent_odp_id && newId) {
+      db.prepare('UPDATE odps SET parent_odp_id=? WHERE id=?').run(parseInt(parent_odp_id), newId);
+    }
+    res.json({ ok: true, id: newId });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Delete ODP from map (JSON)
+router.post('/api/nm/delete-odp', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ ok: false });
+    // unassign children first to avoid orphans
+    db.prepare('UPDATE customers SET odp_id=NULL WHERE odp_id=?').run(id);
+    db.prepare('UPDATE odps SET parent_odp_id=NULL WHERE parent_odp_id=?').run(id);
+    odpSvc.deleteOdp(id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Bulk ACS sync — returns GenieACS device info keyed by pppoe username + tag
+router.get('/api/nm/acs-sync', requireAdminSession, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const s = getSettings();
+    const genieacsUrl = s.genieacs_url || 'http://localhost:7557';
+    const auth = { username: s.genieacs_username || '', password: s.genieacs_password || '' };
+    const projection = [
+      '_id','_tags','_lastInform',
+      'VirtualParameters.RXPower','VirtualParameters.redaman',
+      'VirtualParameters.pppoeUsername','VirtualParameters.pppUsername',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'
+    ].join(',');
+    const r = await axios.get(`${genieacsUrl}/devices`, {
+      params: { query: '{}', projection, limit: 600 }, auth, timeout: 30000
+    });
+    const rows = Array.isArray(r.data) ? r.data : [];
+    const gv = (o, ...paths) => {
+      for (const p of paths) {
+        let cur = o; let ok = true;
+        for (const seg of p.split('.')) { if (cur && cur[seg] !== undefined) cur = cur[seg]; else { ok = false; break; } }
+        if (ok) { const v = (cur && cur._value !== undefined) ? cur._value : cur; if (v !== undefined && v !== null && v !== '') return v; }
+      }
+      return null;
+    };
+    const byPppoe = {}; const byTag = {};
+    rows.forEach(d => {
+      const rx = gv(d, 'VirtualParameters.RXPower', 'VirtualParameters.redaman', 'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower');
+      const ppp = gv(d, 'VirtualParameters.pppoeUsername', 'VirtualParameters.pppUsername', 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username');
+      const ip = gv(d, 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress');
+      const li = d._lastInform ? new Date(d._lastInform).getTime() : null;
+      const online = li ? (Date.now() - li < 15 * 60 * 1000) : false;
+      const info = { rxPower: rx != null ? Number(rx) : null, pppoe: ppp || null, ip: ip || null, online, lastInform: li, deviceId: d._id, tags: d._tags || [] };
+      if (ppp) byPppoe[String(ppp).toLowerCase()] = info;
+      (d._tags || []).forEach(t => { byTag[String(t).toLowerCase()] = info; });
+    });
+    res.json({ ok: true, total: rows.length, byPppoe, byTag });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Update node position (drag)
+router.post('/api/nm/node-position', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { type, id, lat, lng } = req.body;
+    if (!id || !lat || !lng) return res.status(400).json({ ok: false });
+    if (type === 'odp') {
+      db.prepare('UPDATE odps SET lat=?, lng=? WHERE id=?').run(String(lat), String(lng), id);
+    } else if (type === 'customer') {
+      db.prepare('UPDATE customers SET lat=?, lng=? WHERE id=?').run(String(lat), String(lng), id);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Toggle lock
+router.post('/api/nm/toggle-lock', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { type, id, locked } = req.body;
+    if (type === 'odp') {
+      db.prepare('UPDATE odps SET locked=? WHERE id=?').run(locked ? 1 : 0, id);
+    } else if (type === 'customer') {
+      db.prepare('UPDATE customers SET locked=? WHERE id=?').run(locked ? 1 : 0, id);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Save cable path for ODP
+router.post('/api/nm/cable-path', requireAdminSession, nmParser, (req, res) => {
+  try {
+    const { type, id, path } = req.body;
+    const pathStr = JSON.stringify(path);
+    if (type === 'odp') {
+      db.prepare('UPDATE odps SET cable_path=? WHERE id=?').run(pathStr, id);
+    } else if (type === 'customer') {
+      db.prepare('UPDATE customers SET cable_path=? WHERE id=?').run(pathStr, id);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/api/customers/:id/pppoe-traffic', requireAdminSession, async (req, res) => {
   const customerId = Number(req.params.id);
   if (!customerId) return res.status(400).json({ ok: false, error: 'invalid_customer' });
@@ -446,7 +712,7 @@ router.get('/api/customers/:id/pppoe-traffic', requireAdminSession, async (req, 
   const routerId = customer.router_id ? Number(customer.router_id) : null;
   const username = String(customer.pppoe_username || '').trim();
 
-  if (!routerId || !username) {
+  if (!username) {
     return res.json({ ok: true, available: false, online: false, username: username || null, rxMbps: 0, txMbps: 0 });
   }
 
@@ -601,6 +867,15 @@ router.post('/api/customers/:id/cable-path', requireAdminSession, (req, res) => 
   }
 });
 
+// API list ODPs (JSON) — buat panel network-monitor
+router.get('/api/odps', requireAdminSession, (req, res) => {
+  try {
+    res.json({ ok: true, odps: odpSvc.getAllOdps() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.post('/odps', requireAdminSession, restrictToAdmin, express.urlencoded({ extended: true }), (req, res) => {
   try {
     odpSvc.createOdp(req.body);
@@ -608,7 +883,8 @@ router.post('/odps', requireAdminSession, restrictToAdmin, express.urlencoded({ 
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
   }
-  res.redirect('/admin/map');
+  const back = req.body._return === 'monitor' ? '/admin/network-monitor' : '/admin/map';
+  res.redirect(back);
 });
 
 router.post('/odps/:id/update', requireAdminSession, restrictToAdmin, express.urlencoded({ extended: true }), (req, res) => {
@@ -618,17 +894,19 @@ router.post('/odps/:id/update', requireAdminSession, restrictToAdmin, express.ur
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
   }
-  res.redirect('/admin/map');
+  const back = req.body._return === 'monitor' ? '/admin/network-monitor' : '/admin/map';
+  res.redirect(back);
 });
 
-router.post('/odps/:id/delete', requireAdminSession, restrictToAdmin, (req, res) => {
+router.post('/odps/:id/delete', requireAdminSession, restrictToAdmin, express.urlencoded({ extended: true }), (req, res) => {
   try {
     odpSvc.deleteOdp(req.params.id);
     req.session._msg = { type: 'success', text: 'ODP berhasil dihapus.' };
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
   }
-  res.redirect('/admin/map');
+  const back = req.body._return === 'monitor' ? '/admin/network-monitor' : '/admin/map';
+  res.redirect(back);
 });
 
 // --- TECHNICIAN MANAGEMENT ---
@@ -1371,7 +1649,8 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
           if (waResult.success) {
             logger.info(`[Pay-Bulk] Link receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
           } else {
-            logger.error(`[Pay-Bulk] Link receipt FAILED: ${waResult.error}`);
+            const errStr = typeof waResult.error === 'object' ? JSON.stringify(waResult.error) : String(waResult.error);
+            logger.error(`[Pay-Bulk] Link receipt FAILED to ${pdfCustomer.phone}: ${errStr}`);
           }
         } catch (e2) {
           logger.error(`[Pay-Bulk] Failed to send link: ${e2.message}`);
@@ -1413,7 +1692,8 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
         if (waResult.success) {
           logger.info(`[Pay-Single] Link receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
         } else {
-          logger.error(`[Pay-Single] Link receipt FAILED: ${waResult.error}`);
+          const errStr = typeof waResult.error === 'object' ? JSON.stringify(waResult.error) : String(waResult.error);
+          logger.error(`[Pay-Single] Link receipt FAILED to ${pdfCustomer.phone}: ${errStr}`);
         }
       } catch (e2) {
         logger.error(`[Pay-Single] Failed to send link: ${e2.message}`);
@@ -3630,7 +3910,7 @@ router.get('/penagihan', requireAdminSession, (req, res) => {
 });
 
 // Catat pembayaran sebagian
-router.post('/penagihan/partial-pay', requireAdminSession, express.json(), (req, res) => {
+router.post('/penagihan/partial-pay', requireAdminSession, express.json(), async (req, res) => {
   const db = require('../config/database');
   const { invoice_id, amount, notes } = req.body;
   if (!invoice_id || !amount || amount <= 0) {
@@ -3654,6 +3934,19 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), (req,
     if (remaining && remaining.cnt === 0) {
       db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(inv.customer_id);
     }
+    // Kirim notif WA pelunasan
+    try {
+      const customer = db.prepare('SELECT id, name, phone FROM customers WHERE id = ?').get(inv.customer_id);
+      if (customer && customer.phone) {
+        const { sendWhatsAppText } = await import('../services/evolutionService.js');
+        const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
+        const text = `✅ *PEMBAYARAN LUNAS* - Kasir Lapangan\n\nYth. ${customer.name},\n\nPembayaran tagihan periode ${inv.period_month}/${inv.period_year} telah diterima (${amtStr} dari Rp ${Number(inv.amount).toLocaleString('id-ID')}).\n\nBukti pembayaran:\n${receiptUrl}\n\n*ZYA - NET* 🌐`;
+        await sendWhatsAppText(customer.phone, text);
+        logger.info(`[Pay-Penagihan] Receipt sent to ${customer.phone} (invoice ${invoice_id})`);
+      }
+    } catch (e) {
+      logger.error(`[Pay-Penagihan] Failed to send receipt: ${e.message}`);
+    }
     return res.json({ ok: true, message: 'Tagihan lunas!', lunas: true });
   } else {
     db.prepare("UPDATE invoices SET partial_paid = ?, notes = COALESCE(notes, '') || ? WHERE id = ?")
@@ -3664,7 +3957,7 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), (req,
 });
 
 // Pelunasan penuh dari halaman penagihan
-router.post('/penagihan/lunas', requireAdminSession, express.json(), (req, res) => {
+router.post('/penagihan/lunas', requireAdminSession, express.json(), async (req, res) => {
   const db = require('../config/database');
   const { invoice_id, notes } = req.body;
   if (!invoice_id) return res.status(400).json({ ok: false, error: 'Invoice ID required' });
@@ -3683,6 +3976,20 @@ router.post('/penagihan/lunas', requireAdminSession, express.json(), (req, res) 
   const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);
   if (remaining && remaining.cnt === 0) {
     db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(inv.customer_id);
+  }
+
+  // Kirim notif WA pelunasan ke pelanggan
+  try {
+    const customer = db.prepare('SELECT id, name, phone FROM customers WHERE id = ?').get(inv.customer_id);
+    if (customer && customer.phone) {
+      const { sendWhatsAppText } = await import('../services/evolutionService.js');
+      const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
+      const text = `✅ *PEMBAYARAN LUNAS* - Kasir Lapangan\n\nYth. ${customer.name},\n\nPembayaran tagihan periode ${inv.period_month}/${inv.period_year} telah diterima.\n\n💰 Rp ${Number(inv.amount).toLocaleString('id-ID')}\n\nBukti pembayaran:\n${receiptUrl}\n\n*ZYA - NET* 🌐`;
+      await sendWhatsAppText(customer.phone, text);
+      logger.info(`[Pay-Penagihan] Receipt sent to ${customer.phone} (invoice ${invoice_id})`);
+    }
+  } catch (e) {
+    logger.error(`[Pay-Penagihan] Failed to send receipt: ${e.message}`);
   }
 
   return res.json({ ok: true, message: 'Invoice #' + invoice_id + ' lunas' });

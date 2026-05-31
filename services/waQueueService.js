@@ -55,13 +55,19 @@ function enqueue(phone, filePath, caption, type = 'media') {
  */
 async function isInstanceConnected() {
   const settings = getSettings();
+  const url = `${settings.wa_evolution_url}/instance/connectionState/${settings.wa_evolution_instance}`;
   try {
-    const res = await axios.get(
-      `${settings.wa_evolution_url}/instance/connectionState/${settings.wa_evolution_instance}`,
-      { headers: { apikey: settings.wa_evolution_api_key }, timeout: 5000 }
-    );
-    return res.data?.instance?.state === 'open';
+    const res = await axios.get(url, {
+      headers: { apikey: settings.wa_evolution_api_key },
+      timeout: 5000
+    });
+    const state = res.data?.instance?.state;
+    if (state !== 'open') {
+      logger.info(`[WA-Queue] Evolution state: ${state} (url: ${url})`);
+    }
+    return state === 'open';
   } catch (e) {
+    logger.error(`[WA-Queue] isInstanceConnected error: ${e.message} (url: ${url})`);
     return false;
   }
 }

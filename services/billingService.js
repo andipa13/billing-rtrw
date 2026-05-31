@@ -156,22 +156,28 @@ function generateInvoiceForCustomer(customerId, month, year) {
 }
 
 /**
- * Otomatis geser isolate_day berdasarkan tanggal pembayaran.
- * Rule:
- *   - Bayar TELAT (tanggal bayar > isolate_day) → isolate_day bulan depan = tanggal bayar
- *   - Bayar TEPAT atau LEBIH AWAL (tanggal bayar <= isolate_day) → isolate_day tetap
+ * Otomatis geser isolate_day berdasarkan kondisi pembayaran.
+ * Rule (diperbaiki):
+ *   - Pelanggan TELAT bayar (sampai terisolir / status 'suspended') → isolate_day bulan depan = tanggal bayar
+ *   - Pelanggan bayar normal / di muka (status 'active') → isolate_day TETAP (tidak digeser)
+ *
+ * Catatan: fungsi ini dipanggil SEBELUM activateCustomer di route pembayaran,
+ * jadi status 'suspended' di sini = pelanggan yang memang sedang terisolir saat membayar.
+ * Ini mencegah bug: generate+lunasi tagihan bulan depan di akhir bulan TIDAK lagi
+ * menggeser tanggal isolir (karena pelanggan masih aktif / bayar di muka).
  */
 function autoShiftIsolateDay(customerId) {
-  const row = db.prepare('SELECT isolate_day FROM customers WHERE id=?').get(customerId);
+  const row = db.prepare('SELECT isolate_day, status FROM customers WHERE id=?').get(customerId);
   if (!row) return;
   const now = new Date();
   const currentDue = Number(row.isolate_day) || 10;
   const today = now.getDate();
-  if (today > currentDue) {
-    // Bayar telat → geser isolate_day ke tanggal bayar
+
+  // Hanya geser jika pelanggan benar-benar TELAT (sedang terisolir saat bayar).
+  if (row.status === 'suspended' && today !== currentDue) {
     db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(today, customerId);
   }
-  // Bayar tepat/lebih awal → tidak ada perubahan
+  // Pelanggan aktif (bayar normal / di muka) → tanggal isolir tetap.
 }
 
 function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes) {

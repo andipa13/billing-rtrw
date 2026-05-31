@@ -56,7 +56,8 @@ const logger = winston.createLogger({
                 logFormat
             )
         })
-    ]
+    ],
+    exitOnError: false
 });
 
 module.exports = { logger };

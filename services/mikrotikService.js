@@ -33,8 +33,19 @@ async function getConnection(routerId = null) {
     timeout: 5000
   });
 
+  // Catch errors from RouterOSClient event emitter to prevent uncaughtException (!empty bug)
+  api.on('error', (err) => {
+    logger.error(`MikroTik API error (${host}): ${err.message}`);
+  });
+
   try {
     const client = await api.connect();
+    // Also catch connection-level errors
+    if (client && typeof client.on === 'function') {
+      client.on('error', (err) => {
+        logger.error(`MikroTik client error (${host}): ${err.message}`);
+      });
+    }
     return { client, api };
   } catch (err) {
     logger.error(`Failed to connect to MikroTik (${host}):`, err);

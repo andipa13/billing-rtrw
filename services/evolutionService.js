@@ -92,11 +92,19 @@ async function sendWhatsAppText(phone, text) {
   if (!settings.wa_evolution_enabled) return { success: false, error: 'WA disabled' };
   const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
   const apikey = settings.wa_evolution_api_key;
-  const number = phone.startsWith('62') ? phone : '62' + phone.replace(/^0/, '');
+  // Normalisasi nomor: hapus spasi/dash/+, pastikan prefix 62
+  const cleaned = String(phone).replace(/[\s\-+]/g, '');
+  const number = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
   try {
     const res = await axios.post(url, { number, text }, { headers: { apikey }, timeout: 15000 });
+    logger.info(`WA text sent to ${number}: ${res.status}`);
     return { success: true, data: res.data };
   } catch (err) {
-    return { success: false, error: err.response?.data || err.message };
+    const errData = err.response?.data;
+    const errMsg = errData
+      ? (typeof errData === 'string' ? errData : JSON.stringify(errData))
+      : err.message;
+    logger.error(`Failed to send WA text to ${number}: ${errMsg}`);
+    return { success: false, error: errMsg };
   }
 }

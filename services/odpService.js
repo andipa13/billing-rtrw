@@ -7,7 +7,8 @@ const db = require('../config/database');
 
 function getAllOdps() {
   return db.prepare(`
-    SELECT o.*, olt.name as olt_name 
+    SELECT o.*, olt.name as olt_name,
+      (SELECT COUNT(*) FROM customers WHERE odp_id = o.id) as customer_count
     FROM odps o 
     LEFT JOIN olts olt ON o.olt_id = olt.id 
     ORDER BY o.name ASC

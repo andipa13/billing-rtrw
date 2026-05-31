@@ -75,7 +75,14 @@ function startCronJobs() {
       let created = 0;
       for (const c of customers) {
         const dueDay = Number(c.isolate_day) || Number(getSetting('isolir_day', 10)) || 10;
-        const h1 = dueDay - 1; // H-1 sebelum isolir
+        // H-1 sebelum isolir — handle wrap-around untuk isolate_day=1
+        let h1;
+        if (dueDay === 1) {
+          // H-1 dari tgl 1 = hari terakhir bulan ini (misal 31 Mei, 30 Juni)
+          h1 = new Date(year, month, 0).getDate(); // day 0 of next month = last day of current month
+        } else {
+          h1 = dueDay - 1;
+        }
 
         if (today !== h1) continue; // Bukan hari generate untuk pelanggan ini
 
@@ -106,7 +113,7 @@ function startCronJobs() {
   // 2. Notif WA setiap hari jam 10:30
   cron.schedule('30 10 * * *', async () => {
     const enabled = getSetting('whatsapp_auto_billing_enabled', false);
-    const waEnabled = getSetting('whatsapp_enabled', false);
+    const waEnabled = getSetting('whatsapp_enabled', false) || getSetting('wa_evolution_enabled', false);
     if (!enabled || !waEnabled) return;
 
     let sendWA;

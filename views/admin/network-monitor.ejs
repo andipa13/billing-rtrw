@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title><%= title %> | <%= company %></title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0a0a;color:#eee;font-family:'Segoe UI',sans-serif;overflow:hidden}
+    #map{position:fixed;inset:0;z-index:1}
+
+    /* ── DASHBOARD BUTTON ── */
+    .btn-dash{position:absolute;left:20px;top:15px;z-index:1000;padding:10px 20px;border-radius:8px;background:rgba(10,10,10,.9);border:1px solid #333;color:#eee;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none;backdrop-filter:blur(5px)}
+    .btn-dash:hover{background:rgba(40,167,69,.2);border-color:#28a745}
+    .btn-dash i{color:#28a745}
+
+    /* ── HUD PANEL ── */
+    .hud{position:absolute;top:15px;left:180px;z-index:1000;background:rgba(10,10,10,.9);border-left:4px solid #28a745;color:#eee;padding:8px 15px;border-radius:0 10px 10px 0;font-size:11px;text-transform:uppercase;box-shadow:0 5px 15px #00000099;backdrop-filter:blur(5px);display:flex;gap:20px}
+    .hud-it{display:flex;flex-direction:column;align-items:center}
+    .hud-it .hud-v{font-size:16px;font-weight:700}
+    .hud-it .hud-l{font-size:9px;color:#888;margin-top:2px}
+
+    /* ── LAYER SWITCH ── */
+    .layer-sw{position:absolute;top:15px;right:20px;z-index:1000;display:flex;gap:2px;background:rgba(10,10,10,.9);border-radius:8px;padding:3px;backdrop-filter:blur(5px)}
+    .layer-sw button{padding:7px 12px;border:none;background:transparent;color:#888;font-size:11px;font-weight:600;cursor:pointer;border-radius:6px}
+    .layer-sw button.active{background:#28a745;color:#fff}
+
+    /* ── TOOL BUTTONS ── */
+    .tools{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;gap:6px;background:rgba(10,10,10,.9);border-radius:10px;padding:5px;backdrop-filter:blur(5px)}
+    .tools button{padding:8px 14px;border:none;background:transparent;color:#ccc;font-size:11px;font-weight:600;cursor:pointer;border-radius:8px;display:flex;align-items:center;gap:5px}
+    .tools button:hover{background:rgba(255,255,255,.1)}
+    .tools button.active{background:#dc3545;color:#fff}
+    .tools button i{font-size:13px}
+
+    /* ── ZOOM ── */
+    .leaflet-control-zoom{display:none}
+    .custom-zoom{position:absolute;right:20px;top:80px;z-index:1000;display:flex;flex-direction:column;gap:3px}
+    .custom-zoom button{width:34px;height:34px;background:rgba(10,10,10,.9);border:1px solid #333;color:#fff;font-size:16px;cursor:pointer;border-radius:6px;display:flex;align-items:center;justify-content:center}
+    .custom-zoom button:hover{background:#28a745;border-color:#28a745}
+
+    /* ── MARKERS ── */
+    .marker-base{border:2px solid #fff;box-shadow:0 3px 6px rgba(0,0,0,.4);color:#fff;display:flex;justify-content:center;align-items:center;position:relative}
+    .marker-online{background:#28a745}
+    .marker-offline{background:#dc3545;animation:pulse-red 1.5s infinite}
+    .marker-isolir{background:#f39c12}
+    .marker-poe{background:#f3ba2f}
+    @keyframes pulse-red{0%,100%{box-shadow:0 0 8px #dc3545}50%{box-shadow:0 0 20px #dc3545}}
+
+    .odp-box{border-radius:4px;border:2px solid #fff;box-shadow:0 3px 6px rgba(0,0,0,.4);color:#fff;font-weight:bold;display:flex;justify-content:center;align-items:center;font-size:14px;position:relative}
+    .odp-safe{background:#28a745}
+    .odp-warn{background:#f1c40f;color:#fff}
+    .odp-full{background:#dc3545}
+    .odp-jb{background:#6f42c1}
+    .olt-active{border-color:#f3ba2f!important;box-shadow:0 0 10px #f3ba2f}
+
+    .map-label{position:absolute;top:28px;left:50%;transform:translateX(-50%);color:#fff;font-size:11px;font-weight:700;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none;background:rgba(0,0,0,.65);padding:2px 6px;border-radius:4px}
+    .alert-badge{position:absolute;top:-6px;right:-6px;width:16px;height:16px;background:#f39c12;border-radius:50%;font-size:10px;line-height:16px;text-align:center}
+    .odp-alert-badge{position:absolute;top:2px;right:2px;width:14px;height:14px;background:#f39c12;border-radius:50%;font-size:9px;line-height:14px;text-align:center}
+
+    /* ── INFO BAR ── */
+    .info-bar{position:absolute;bottom:80px;left:20px;z-index:1000;background:rgba(10,10,10,.9);border-radius:10px;padding:10px 16px;font-size:11px;backdrop-filter:blur(5px);display:flex;gap:20px;border:1px solid #222}
+    .info-bar .ib-item{text-align:center}
+    .info-bar .ib-val{font-size:16px;font-weight:700}
+    .info-bar .ib-val.on{color:#28a745}.info-bar .ib-val.of{color:#dc3545}.info-bar .ib-val.is{color:#f39c12}
+    .info-bar .ib-lbl{font-size:9px;color:#888;margin-top:2px}
+
+    /* ── POPUP ── */
+    .leaflet-popup-content-wrapper{background:rgba(10,10,10,.95);border:1px solid #333;border-radius:14px;color:#eee;box-shadow:0 12px 40px #000000cc;backdrop-filter:blur(16px)}
+    .leaflet-popup-tip{background:rgba(10,10,10,.95)}
+    .leaflet-popup-content{margin:10px 16px;min-width:200px;font-family:inherit}
+    .p-title{font-size:14px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .p-badge{font-size:9px;padding:2px 8px;border-radius:20px;font-weight:700;text-transform:uppercase}
+    .p-badge.on{background:#166534;color:#4ade80}
+    .p-badge.of{background:#7f1d1d;color:#f87171}
+    .p-badge.sp{background:#78350f;color:#fbbf24}
+    .p-badge.pn{background:#7f1d1d;color:#f87171}
+    .p-badge.wr{background:#78350f;color:#fbbf24}
+    .p-badge.ok{background:#166534;color:#4ade80}
+    .p-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;color:#888}
+    .p-row span:last-child{color:#ddd;font-weight:600}
+    .p-act{display:flex;gap:5px;margin-top:8px}
+    .p-btn{flex:1;padding:5px 8px;border-radius:6px;border:none;cursor:pointer;font-size:10px;font-weight:700;text-align:center;color:#fff}
+    .p-btn.ed{background:#1d4ed8}.p-btn.lk{background:#374151}.p-btn.cb{background:#7c3aed}.p-btn.rm{background:#991b1b}
+    .nm-sel{width:100%;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:11px;outline:none;cursor:pointer}
+    .nm-sel:focus{border-color:#28a745}
+    .nm-sel option{background:#1a1a1a;color:#fff}
+
+    /* ── SEARCH ── */
+    .srch{position:absolute;top:70px;left:20px;z-index:1000}
+    .srch input{background:rgba(10,10,10,.9);border:1px solid #333;border-radius:8px;color:#eee;padding:8px 14px;font-size:12px;width:240px;outline:none;backdrop-filter:blur(5px)}
+    .srch input::placeholder{color:#555}
+    .srch input:focus{border-color:#28a745}
+
+    .force-hide-labels .map-label{display:none!important}
+
+    @media(max-width:768px){
+      .hud{left:100px;gap:12px;padding:6px 10px}
+      .hud-it .hud-v{font-size:13px}
+      .layer-sw{right:10px}
+      .layer-sw button{padding:5px 8px;font-size:10px}
+      .btn-dash{left:10px;padding:8px 14px;font-size:11px}
+      .info-bar{left:10px;bottom:70px;gap:12px;padding:8px 12px}
+      .info-bar .ib-val{font-size:13px}
+      .srch{top:60px;left:10px}
+      .srch input{width:180px}
+    }
+  </style>
+</head>
+<body>
+  <!-- Dashboard Button -->
+  <a href="/admin" class="btn-dash"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+
+  <!-- HUD System Stats -->
+  <div class="hud" id="hudPanel">
+    <div class="hud-it"><span class="hud-v" id="s-cpu">--</span><span class="hud-l">CPU</span></div>
+    <div class="hud-it"><span class="hud-v" id="s-ram">--</span><span class="hud-l">RAM</span></div>
+    <div class="hud-it"><span class="hud-v" id="s-disk">--</span><span class="hud-l">DISK</span></div>
+    <div class="hud-it"><span class="hud-v" id="s-temp">--</span><span class="hud-l">TEMP</span></div>
+  </div>
+
+  <!-- Layer Switch -->
+  <div class="layer-sw">
+    <button class="active" onclick="setMapType('hybrid')" id="btn-hybrid">Hybrid</button>
+    <button onclick="setMapType('satellite')" id="btn-satellite">Satelit</button>
+    <button onclick="setMapType('street')" id="btn-street">Peta</button>
+  </div>
+
+  <!-- Search -->
+  <div class="srch"><input type="text" id="nmQ" placeholder="&#xf002; Cari perangkat..."></div>
+
+  <!-- Custom Zoom -->
+  <div class="custom-zoom">
+    <button onclick="map.zoomIn()"><i class="fas fa-plus"></i></button>
+    <button onclick="map.zoomOut()"><i class="fas fa-minus"></i></button>
+  </div>
+
+  <!-- Info Bar -->
+  <div class="info-bar">
+    <div class="ib-item"><span class="ib-val on" id="ib-online">-</span><div class="ib-lbl">ONLINE</div></div>
+    <div class="ib-item"><span class="ib-val of" id="ib-offline">-</span><div class="ib-lbl">OFFLINE</div></div>
+    <div class="ib-item"><span class="ib-val is" id="ib-isolir">-</span><div class="ib-lbl">ISOLIR</div></div>
+    <div class="ib-item"><span class="ib-val" style="color:#6f42c1" id="ib-odp">-</span><div class="ib-lbl">ODP</div></div>
+    <div class="ib-item"><span class="ib-val" style="color:#3b82f6" id="ib-acs">-</span><div class="ib-lbl">ONU/ACS</div></div>
+    <div class="ib-item"><span class="ib-val" style="color:#f3ba2f" id="ib-trx">-</span><div class="ib-lbl">TX/RX</div></div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="tools">
+    <button id="btnAddOdp" onclick="toggleAddOdp()"><i class="fas fa-plus-circle"></i> Tambah ODP</button>
+    <button id="btnLabel" onclick="toggleLabels()"><i class="fas fa-tags"></i> Label</button>
+    <button id="btnCable" onclick="toggleCable()"><i class="fas fa-draw-polygon"></i> Kabel</button>
+    <button onclick="fitAll()"><i class="fas fa-expand"></i> Fit</button>
+    <button onclick="loadAll()"><i class="fas fa-sync-alt"></i> Refresh</button>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Add ODP Banner (shown while placing) -->
+  <div id="addOdpBanner" style="display:none;position:absolute;top:120px;left:50%;transform:translateX(-50%);z-index:1500;background:rgba(40,167,69,.95);color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 5px 20px rgba(0,0,0,.5)">
+    <i class="fas fa-map-marker-alt"></i> Klik di peta untuk menempatkan ODP baru &nbsp; <span style="opacity:.8;cursor:pointer" onclick="cancelAddOdp()">(batal)</span>
+  </div>
+
+  <!-- Add ODP Modal -->
+  <div id="addOdpModal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:14px;padding:20px;width:340px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.7)">
+      <div style="font-size:16px;font-weight:700;margin-bottom:14px;color:#fff"><i class="fas fa-box-open" style="color:#f1c40f"></i> Tambah ODP Baru</div>
+      <div style="font-size:11px;color:#888;margin-bottom:3px">Nama ODP</div>
+      <input id="aoName" placeholder="contoh: ODP-7" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #444;background:#0d0d0d;color:#fff;font-size:13px;margin-bottom:12px;outline:none">
+      <div style="font-size:11px;color:#888;margin-bottom:3px">Kapasitas Port</div>
+      <input id="aoCap" type="number" value="16" min="1" max="64" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #444;background:#0d0d0d;color:#fff;font-size:13px;margin-bottom:12px;outline:none">
+      <div style="font-size:11px;color:#888;margin-bottom:3px">Sambung ke (Induk)</div>
+      <select id="aoParent" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #444;background:#0d0d0d;color:#fff;font-size:13px;margin-bottom:8px;outline:none"></select>
+      <div id="aoCoord" style="font-size:10px;color:#666;margin-bottom:14px"></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveNewOdp()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#28a745;color:#fff;font-weight:700;cursor:pointer">Simpan</button>
+        <button onclick="closeAddOdpModal()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#444;color:#fff;font-weight:700;cursor:pointer">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+  <script>
+  const HQ=[<%= hqLat %>,<%= hqLng %>];
+  const map=L.map('map',{zoomControl:false,preferCanvas:true}).setView(HQ,17);
+
+  const googleHybrid=L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:24,maxNativeZoom:20,subdomains:['0','1','2','3']});
+  const googleSat=L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:24,maxNativeZoom:20,subdomains:['0','1','2','3']});
+  const cartoDark=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:24,maxNativeZoom:20});
+  googleHybrid.addTo(map);
+
+  function setMapType(t){
+    [googleHybrid,googleSat,cartoDark].forEach(l=>map.removeLayer(l));
+    document.querySelectorAll('.layer-sw button').forEach(b=>b.classList.remove('active'));
+    if(t==='satellite'){googleSat.addTo(map);document.getElementById('btn-satellite').classList.add('active')}
+    else if(t==='street'){cartoDark.addTo(map);document.getElementById('btn-street').classList.add('active')}
+    else{googleHybrid.addTo(map);document.getElementById('btn-hybrid').classList.add('active')}
+  }
+
+  map.createPane('cables');map.getPane('cables').style.zIndex=400;
+  map.createPane('markers');map.getPane('markers').style.zIndex=600;
+  const svgR=L.svg();
+  const cluster=L.markerClusterGroup({disableClusteringAtZoom:18,maxClusterRadius:50,spiderfyOnMaxZoom:true}).addTo(map);
+  const cableL=L.layerGroup().addTo(map);
+
+  let data={server:{},odps:[],clients:[]},layersMap={};
+  let cableMode=false,cableTarget=null,cablePts=[],cableTmpline=null;
+
+  function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])}
+
+  function iconHtml(o,type){
+    if(type==='server'){
+      const col=o.status==='online'?'#f3ba2f':'#dc3545';
+      const al=o.status==='offline'?'<div class="alert-badge">!</div>':'';
+      return `<div class="marker-base" style="width:34px;height:34px;border-radius:50%;background:${col}"><i class="fas fa-server" style="font-size:16px;${o.status==='online'?'color:#fff':''}"></i>${al}</div><div class="map-label">${esc(o.name)}</div>`;
+    }
+    if(type==='odp'){
+      const ch=data.clients.filter(c=>c.parent===o.id);
+      const used=ch.length,total=o.port_capacity||16;
+      const rem=total-used;
+      let cls='odp-box';
+      if(rem<=0)cls+=' odp-full';else if(rem<=2)cls+=' odp-warn';else cls+=' odp-safe';
+      const ic=o.odp_type==='olt'?'fa-server':'fa-box-open';
+      const sz=26;
+      const allDown=ch.length&&ch.every(c=>c.status==='offline');
+      const al=allDown?'<div class="odp-alert-badge">!</div>':'';
+      return `<div class="${cls}" style="width:${sz}px;height:${sz}px"><i class="fas ${ic}" style="font-size:13px"></i>${al}</div><div class="map-label">${esc(o.name)}</div>`;
+    }
+    const cls=o.status==='online'?'marker-online':o.status==='isolir'?'marker-isolir':'marker-offline';
+    const al=o.status==='offline'?'<div class="alert-badge">!</div>':'';
+    return `<div class="marker-base ${cls}" style="width:24px;height:24px;border-radius:50%"><i class="fas fa-wifi" style="font-size:11px"></i>${al}</div><div class="map-label">${esc(o.name)}</div>`;
+  }
+
+  async function loadAll(){
+    try{
+      // Restore server position from localStorage
+      let serverCoords=[HQ[0],HQ[1]];
+      try{const saved=JSON.parse(localStorage.getItem('nm_server_coords'));if(saved&&saved[0])serverCoords=saved}catch(e){}
+
+      const r=await fetch('/admin/api/network-topology');
+      const d=await r.json();
+      data.server={id:'router',name:'MikroTik',status:'online',coordinates:serverCoords,locked:false};
+      data.odps=d.nodes.filter(n=>n.level===1).map(n=>({id:n.id,odp_id:n.odp_id,name:n.label,status:'online',
+        coordinates:n.lat?[n.lat,n.lng]:null,cable_path:n.cable_path,locked:n.locked,port_capacity:n.port_capacity||16,odp_type:n.group.includes('olt')?'olt':'htb',
+        parent:n.parent_odp_id?('odp-'+n.parent_odp_id):'router',parent_odp_id:n.parent_odp_id||null}));
+      data.clients=d.nodes.filter(n=>n.level===2).map(n=>({id:n.id,cust_id:n.cust_id,name:n.label,status:n.group,
+        parent:d.edges.find(e=>e.to===n.id)?.from||'router',
+        coordinates:n.lat?[n.lat,n.lng]:null,cable_path:n.cable_path,locked:n.locked,pppoe:n.pppoe,package:n.package,wa_number:n.phone}));
+
+      // ACS sync — enrich clients with GenieACS data (rxPower, ip, onu status)
+      try{
+        const ar=await fetch('/admin/api/nm/acs-sync');
+        const aj=await ar.json();
+        if(aj.ok){
+          window.acsData=aj;
+          data.clients.forEach(c=>{
+            const info=c.pppoe?aj.byPppoe[String(c.pppoe).toLowerCase()]:null;
+            if(info){c.rxPower=info.rxPower;c.acsIp=info.ip;c.onuOnline=info.online;c.acsTags=info.tags}
+          });
+          const onuOn=data.clients.filter(c=>c.onuOnline).length;
+          const elAcs=document.getElementById('ib-acs');if(elAcs)elAcs.textContent=aj.total;
+        }
+      }catch(e){}
+
+      // System stats
+      try{
+        const sr=await fetch('/admin/api/system-stats');
+        const ss=await sr.json();
+        document.getElementById('s-cpu').textContent=ss.cpu+'%';
+        document.getElementById('s-ram').textContent=ss.ram+'%';
+        document.getElementById('s-disk').textContent=ss.disk+'%';
+        document.getElementById('s-temp').innerHTML=ss.temp+'&deg;C';
+        if(ss.temp>60)document.getElementById('s-temp').style.color='#dc3545';
+      }catch(e){}
+
+      renderAll();
+    }catch(e){console.error(e)}
+  }
+
+  function renderAll(){
+    cluster.clearLayers();cableL.clearLayers();layersMap={};
+
+    function getCoord(o,type){
+      if(o.coordinates&&o.coordinates[0]&&Math.abs(o.coordinates[0])>0.0001)return o.coordinates;
+      let pid=o.parent||(type==='odp'?'router':null);
+      if(!pid)pid='router';
+      let pc=pid==='router'?(data.server.coordinates||[HQ[0],HQ[1]]):null;
+      if(!pc){const p=data.odps.find(x=>x.id===pid)||data.clients.find(x=>x.id===pid);pc=p&&p.coordinates?p.coordinates:[HQ[0],HQ[1]]}
+      const sibs=type==='odp'?data.odps.filter(x=>(x.parent||'router')===pid):data.clients.filter(x=>(x.parent||'router')===pid);
+      const idx=sibs.indexOf(o),total=Math.max(sibs.length,1);
+      const ang=(2*Math.PI*idx)/total,dist=type==='odp'?0.0008:0.0004;
+      return [pc[0]+dist*Math.cos(ang),pc[1]+dist*Math.sin(ang)];
+    }
+
+    if(!data.server.coordinates||!data.server.coordinates[0]){
+      try{const s=JSON.parse(localStorage.getItem('nm_server_coords'));data.server.coordinates=s||[HQ[0],HQ[1]]}catch(e){data.server.coordinates=[HQ[0],HQ[1]]}
+    }
+    addMarker('server',data.server);
+    data.odps.forEach(o=>{o.coordinates=getCoord(o,'odp');addMarker('odp',o)});
+    data.clients.forEach(c=>{c.coordinates=getCoord(c,'client');addMarker('client',c)});
+
+    // Info bar
+    const cl=data.clients;
+    document.getElementById('ib-online').textContent=cl.filter(c=>c.status==='online').length;
+    document.getElementById('ib-offline').textContent=cl.filter(c=>c.status==='offline').length;
+    document.getElementById('ib-isolir').textContent=cl.filter(c=>c.status==='isolir').length;
+    document.getElementById('ib-odp').textContent=data.odps.length;
+
+    drawCables();
+  }
+
+  function addMarker(type,o){
+    if(!o.coordinates||!o.coordinates[0])return;
+    const mk=L.marker(o.coordinates,{draggable:true,pane:'markers'});
+    updateIcon(mk,o,type);
+    mk.bindPopup(popup(o,type),{maxWidth:280});
+    mk.on('dblclick',()=>{}); // reserved
+    if(type==='client'){
+      mk.on('popupopen',()=>{startTrafficPoll(o)});
+      mk.on('popupclose',()=>{stopTrafficPoll()});
+    }
+    mk.on('dragend',e=>{
+      const p=e.target.getLatLng();o.coordinates=[p.lat,p.lng];
+      // Save server position to localStorage
+      if(type==='server') localStorage.setItem('nm_server_coords',JSON.stringify([p.lat,p.lng]));
+      const t=type==='server'?'router':type==='odp'?'odp':'customer';
+      const id=type==='odp'?o.odp_id:type==='client'?o.cust_id:null;
+      if(id)fetch('/admin/api/nm/node-position',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:t,id,lat:p.lat,lng:p.lng})});
+      drawCables();
+    });
+    mk.addTo(cluster);
+    if(!layersMap[o.id])layersMap[o.id]={marker:null,cables:[]};
+    layersMap[o.id].marker=mk;
+  }
+
+  function updateIcon(mk,o,type){
+    const html=iconHtml(o,type);
+    const sz=type==='server'?34:type==='odp'?26:24;
+    mk.setIcon(L.divIcon({html,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}));
+    mk.setZIndexOffset(type==='server'?1000:type==='odp'?900:800);
+  }
+
+  function popup(o,type){
+    if(type==='server')return `<div class="p-title"><i class="fas fa-server" style="color:#f3ba2f"></i> ${esc(o.name)} <span class="p-badge on">ONLINE</span></div>`;
+    if(type==='odp'){
+      const ch=data.clients.filter(c=>c.parent===o.id);
+      const used=ch.length,total=o.port_capacity||16;
+      const pct=Math.round(used/total*100);
+      const bc=used>=total?'pn':pct>=70?'wr':'ok';
+      const bt=used>=total?'PENUH':pct>=70?'HAMPIR':'TERSEDIA';
+      const opts=`<option value="router" ${!o.parent_odp_id?'selected':''}>MikroTik (Pusat)</option>`+
+        data.odps.filter(x=>x.odp_id!==o.odp_id).map(x=>`<option value="${x.odp_id}" ${o.parent_odp_id==x.odp_id?'selected':''}>${esc(x.name)}</option>`).join('');
+      return `<div class="p-title"><i class="fas fa-box-open" style="color:#f1c40f"></i> ${esc(o.name)} <span class="p-badge ${bc}">${bt}</span></div>
+        <div class="p-row"><span>Port</span><span>${used}/${total} (${pct}%)</span></div>
+        <div class="p-row"><span>Koordinat</span><span>${o.coordinates[0].toFixed(5)}, ${o.coordinates[1].toFixed(5)}</span></div>
+        <div style="margin-top:8px"><div style="font-size:10px;color:#888;margin-bottom:3px">Sambung ke (Induk):</div>
+        <select class="nm-sel" onchange="assignOdpParent(${o.odp_id},this.value)">${opts}</select></div>
+        <div class="p-act"><button class="p-btn lk" onclick="toggleLock('${o.id}','odp')">${o.locked?'<i class="fas fa-unlock"></i>':'<i class="fas fa-lock"></i>'} ${o.locked?'Unlock':'Lock'}</button><button class="p-btn cb" onclick="startCable('${o.id}')"><i class="fas fa-project-diagram"></i> Kabel</button><button class="p-btn rm" onclick="deleteOdp(${o.odp_id})"><i class="fas fa-trash"></i></button></div>`;
+    }
+    const bc=o.status==='online'?'on':o.status==='isolir'?'sp':'of';
+    const bt=o.status==='online'?'ONLINE':o.status==='isolir'?'ISOLIR':'OFFLINE';
+    const copts=`<option value="">MikroTik (Pusat)</option>`+
+      data.odps.map(x=>`<option value="${x.odp_id}" ${o.parent==('odp-'+x.odp_id)?'selected':''}>${esc(x.name)}</option>`).join('');
+    return `<div class="p-title"><i class="fas fa-wifi" style="color:#4ade80"></i> ${esc(o.name)} <span class="p-badge ${bc}">${bt}</span></div>
+      <div class="p-row"><span>PPPoE</span><span>${o.pppoe||'-'}</span></div>
+      <div class="p-row"><span>Paket</span><span>${o.package||'-'}</span></div>
+      <div class="p-row"><span>WA</span><span>${o.wa_number||'-'}</span></div>
+      ${o.rxPower!=null?`<div class="p-row"><span>Redaman (RX)</span><span style="color:${o.rxPower<-27?'#f87171':o.rxPower<-25?'#fbbf24':'#4ade80'}">${o.rxPower} dBm</span></div>`:''}
+      ${o.acsIp?`<div class="p-row"><span>IP ONU</span><span>${o.acsIp}</span></div>`:''}
+      ${o.onuOnline!=null?`<div class="p-row"><span>Status ONU</span><span style="color:${o.onuOnline?'#4ade80':'#f87171'}">${o.onuOnline?'Online':'Offline'}</span></div>`:''}
+      <div class="p-row" id="trf-${o.cust_id}"><span>Live Traffic</span><span style="color:#f3ba2f">memuat...</span></div>
+      <div style="margin-top:8px"><div style="font-size:10px;color:#888;margin-bottom:3px">Tersambung ke ODP:</div>
+      <select class="nm-sel" onchange="assignClient(${o.cust_id},this.value)">${copts}</select></div>
+      <div class="p-act"><button class="p-btn ed" onclick="window.location='/admin/customers/${o.cust_id}'"><i class="fas fa-edit"></i> Edit</button><button class="p-btn lk" onclick="toggleLock('${o.id}','client')">${o.locked?'<i class="fas fa-unlock"></i>':'<i class="fas fa-lock"></i>'}</button><button class="p-btn cb" onclick="startCable('${o.id}')"><i class="fas fa-project-diagram"></i> Kabel</button></div>`;
+  }
+
+  function drawCables(){
+    cableL.clearLayers();
+    const all=[...data.odps,...data.clients];
+    all.forEach(node=>{
+      let pid=node.parent||'router';
+      if(pid.startsWith('odp-'))pid=pid;
+      const parent=pid==='router'?data.server:data.odps.find(o=>o.id===pid)||data.clients.find(c=>c.id===pid);
+      if(!parent||!parent.coordinates||!node.coordinates)return;
+      const cp=node.cable_path||[];
+      const pts=cp.length>1?[parent.coordinates,...cp,node.coordinates]:[parent.coordinates,node.coordinates];
+      let color='#28a745',dash=null;
+      if(node.status==='offline'){color='#dc3545';dash='10,10'}
+      else if(node.status==='isolir'){color='#6f42c1'}
+      const w=node.level===1?6:4;
+      L.polyline(pts,{color,weight:w,dashArray:dash,pane:'cables',renderer:svgR}).addTo(cableL);
+    });
+  }
+
+  // Cable draw
+  // ── Tambah ODP via klik peta ──
+  let addOdpMode=false, addOdpCoord=null;
+  function toggleAddOdp(){
+    if(!addOdpMode){
+      addOdpMode=true; addOdpCoord=null;
+      document.getElementById('btnAddOdp').classList.add('active');
+      document.getElementById('addOdpBanner').style.display='block';
+      map.getContainer().style.cursor='crosshair';
+      map.on('click',onAddOdpClick);
+    } else cancelAddOdp();
+  }
+  function cancelAddOdp(){
+    addOdpMode=false;
+    document.getElementById('btnAddOdp').classList.remove('active');
+    document.getElementById('addOdpBanner').style.display='none';
+    map.getContainer().style.cursor='';
+    map.off('click',onAddOdpClick);
+  }
+  function onAddOdpClick(e){
+    addOdpCoord=[e.latlng.lat,e.latlng.lng];
+    cancelAddOdp();
+    // populate parent dropdown
+    const sel=document.getElementById('aoParent');
+    sel.innerHTML='<option value="">MikroTik (Pusat)</option>'+
+      data.odps.map(x=>`<option value="${x.odp_id}">${esc(x.name)}</option>`).join('');
+    document.getElementById('aoName').value='';
+    document.getElementById('aoCap').value='16';
+    document.getElementById('aoCoord').textContent='Koordinat: '+addOdpCoord[0].toFixed(5)+', '+addOdpCoord[1].toFixed(5);
+    document.getElementById('addOdpModal').style.display='flex';
+    document.getElementById('aoName').focus();
+  }
+  function closeAddOdpModal(){document.getElementById('addOdpModal').style.display='none';addOdpCoord=null}
+  let savingOdp=false;
+  async function saveNewOdp(){
+    if(savingOdp)return;
+    const name=document.getElementById('aoName').value.trim();
+    if(!name){alert('Nama ODP wajib diisi');return}
+    if(!addOdpCoord){alert('Koordinat tidak ada');return}
+    const cap=parseInt(document.getElementById('aoCap').value)||16;
+    const parent=document.getElementById('aoParent').value||null;
+    savingOdp=true;
+    const btn=document.querySelector('#addOdpModal button[onclick="saveNewOdp()"]');
+    if(btn){btn.disabled=true;btn.textContent='Menyimpan...'}
+    try{
+      const r=await fetch('/admin/api/nm/add-odp',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name,lat:addOdpCoord[0],lng:addOdpCoord[1],port_capacity:cap,parent_odp_id:parent})});
+      const j=await r.json();
+      if(j.ok){closeAddOdpModal();await loadAll()}
+      else alert('Gagal: '+(j.error||'unknown'));
+    }catch(e){alert('Error: '+e.message)}
+    finally{savingOdp=false;if(btn){btn.disabled=false;btn.textContent='Simpan'}}
+  }
+  async function deleteOdp(odpId){
+    if(!confirm('Hapus ODP ini? Pelanggan yang terhubung akan dilepas (tidak dihapus).'))return;
+    try{
+      await fetch('/admin/api/nm/delete-odp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:odpId})});
+      map.closePopup();loadAll();
+    }catch(e){alert('Error: '+e.message)}
+  }
+
+  function toggleCable(){
+    if(!cableMode){cableMode=true;cablePts=[];cableTarget=null;
+      document.getElementById('btnCable').classList.add('active');document.getElementById('btnCable').innerHTML='<i class="fas fa-times-circle"></i> Batal';
+      map.on('click',onCablePt)}
+    else cancelCable();
+  }
+  function startCable(id){cableTarget=id;cablePts=[];if(!cableMode)toggleCable()}
+  function onCablePt(e){cablePts.push([e.latlng.lat,e.latlng.lng]);if(cableTmpline)map.removeLayer(cableTmpline);if(cablePts.length>1)cableTmpline=L.polyline(cablePts,{color:'#a855f7',weight:3,dashArray:'6,3'}).addTo(map)}
+  map.on('dblclick',async e=>{
+    if(!cableMode||cablePts.length<2)return;
+    L.DomEvent.stopPropagation(e);
+    const node=cableTarget?findNode(cableTarget):null;if(!node){cancelCable();return}
+    node.cable_path=cablePts;
+    const t=node.odp_id?'odp':'customer',id=node.odp_id||node.cust_id;
+    if(id)await fetch('/admin/api/nm/cable-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:t,id,path:cablePts})});
+    cancelCable();drawCables();
+  });
+  function cancelCable(){
+    cableMode=false;cableTarget=null;cablePts=[];
+    if(cableTmpline){map.removeLayer(cableTmpline);cableTmpline=null}
+    map.off('click',onCablePt);
+    document.getElementById('btnCable').classList.remove('active');
+    document.getElementById('btnCable').innerHTML='<i class="fas fa-draw-polygon"></i> Kabel';
+  }
+
+  function findNode(id){
+    if(id==='router')return data.server;
+    return data.odps.find(o=>o.id===id)||data.clients.find(c=>c.id===id);
+  }
+
+  // ── Live traffic polling (per client popup) ──
+  let trafficTimer=null;
+  async function pollTraffic(cust_id){
+    try{
+      const r=await fetch('/admin/api/customers/'+cust_id+'/pppoe-traffic');
+      const j=await r.json();
+      const el=document.getElementById('trf-'+cust_id);
+      if(!el)return;
+      if(j.ok&&j.online){
+        const rx=(j.rxMbps||0).toFixed(2),tx=(j.txMbps||0).toFixed(2);
+        el.innerHTML=`<span>Live Traffic</span><span style="color:#f3ba2f"><i class="fas fa-arrow-down" style="color:#4ade80"></i> ${rx} <i class="fas fa-arrow-up" style="color:#60a5fa"></i> ${tx} Mbps</span>`;
+      }else if(j.ok&&!j.online){
+        el.innerHTML='<span>Live Traffic</span><span style="color:#f87171">Offline (PPPoE)</span>';
+      }else{
+        el.innerHTML='<span>Live Traffic</span><span style="color:#888">N/A</span>';
+      }
+    }catch(e){}
+  }
+  function startTrafficPoll(o){
+    stopTrafficPoll();
+    if(!o.cust_id)return;
+    pollTraffic(o.cust_id);
+    trafficTimer=setInterval(()=>pollTraffic(o.cust_id),3000);
+  }
+  function stopTrafficPoll(){if(trafficTimer){clearInterval(trafficTimer);trafficTimer=null}}
+
+  async function assignClient(custId,odpId){
+    try{
+      await fetch('/admin/api/nm/assign-client',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:custId,odp_id:odpId||null})});
+      map.closePopup();await loadAll();
+    }catch(e){alert('Gagal: '+e.message)}
+  }
+  async function assignOdpParent(odpId,parentVal){
+    try{
+      const parent_odp_id=(parentVal==='router'||!parentVal)?null:parseInt(parentVal);
+      const r=await fetch('/admin/api/nm/assign-odp-parent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({odp_id:odpId,parent_odp_id})});
+      const j=await r.json();
+      if(!j.ok){alert(j.error==='self_parent'?'ODP tidak bisa jadi induk dirinya sendiri':'Gagal');return}
+      map.closePopup();await loadAll();
+    }catch(e){alert('Gagal: '+e.message)}
+  }
+
+  async function toggleLock(id,type){
+    const node=findNode(id);if(!node)return;
+    node.locked=!node.locked;
+    const t=type==='odp'?'odp':'customer',oid=type==='odp'?node.odp_id:node.cust_id;
+    if(oid)await fetch('/admin/api/nm/toggle-lock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:t,id:oid,locked:node.locked})});
+    const lay=layersMap[id];
+    if(lay&&lay.marker){lay.marker.dragging[node.locked?'disable':'enable']();map.closePopup();setTimeout(()=>lay.marker.openPopup(),100)}
+  }
+
+  function fitAll(){
+    const pts=[];
+    if(data.server.coordinates)pts.push(data.server.coordinates);
+    data.odps.forEach(o=>o.coordinates&&pts.push(o.coordinates));
+    data.clients.forEach(c=>c.coordinates&&pts.push(c.coordinates));
+    if(pts.length)map.fitBounds(L.latLngBounds(pts),{padding:[50,50]});
+  }
+
+  function toggleLabels(){document.body.classList.toggle('force-hide-labels');document.getElementById('btnLabel').classList.toggle('active')}
+
+  document.getElementById('nmQ').addEventListener('input',function(){
+    const q=this.value.toLowerCase().trim();if(!q)return;
+    const all=[data.server,...data.odps,...data.clients];
+    const f=all.find(n=>n.name&&n.name.toLowerCase().includes(q));
+    if(f&&layersMap[f.id]&&layersMap[f.id].marker){map.setView(layersMap[f.id].marker.getLatLng(),19);layersMap[f.id].marker.openPopup()}
+  });
+
+  loadAll();setInterval(loadAll,30000);
+  </script>
+</body>
+</html>

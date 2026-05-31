@@ -19,6 +19,12 @@ process.on('unhandledRejection', (reason, promise) => {
   logger.error(`Unhandled Rejection: ${errorMsg}`);
 });
 
+// Handle uncaught exceptions (node-routeros !empty bug, etc.) to prevent 502 crashes
+process.on('uncaughtException', (err) => {
+  logger.error(`uncaughtException: ${err.message}\n${err.stack}`);
+  // Don't exit — the server can keep serving other requests
+});
+
 // Settings Management
 const session = require('express-session');
 const { getSetting } = require('./config/settingsManager');
