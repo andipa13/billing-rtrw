@@ -15,10 +15,16 @@ async function sendWhatsApp(phone, message) {
     'Content-Type': 'application/json'
   };
 
+  // Normalize: strip non-digit, ensure 62 prefix, add @s.whatsapp.net
+  const cleaned = String(phone).replace(/[^0-9]/g, '');
+  const prefixed = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  const number = prefixed.includes('@') ? prefixed : prefixed + '@s.whatsapp.net';
+
   try {
     const response = await axios.post(url, {
-      number: phone,
-      text: message
+      number: number,
+      text: message,
+      options: { linkPreview: false }
     }, { headers });
 
     logger.info(`WA sent to ${phone}: ${response.status}`);
@@ -58,8 +64,13 @@ async function sendWhatsAppMedia(phone, filePath, caption = '') {
     'Content-Type': 'application/json'
   };
 
+  // Normalize phone number
+  const cleaned = String(phone).replace(/[^0-9]/g, '');
+  const prefixed = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  const number = prefixed.includes('@') ? prefixed : prefixed + '@s.whatsapp.net';
+
   const payload = {
-    number: phone,
+    number: number,
     caption: caption,
     mediatype: mediatype,
     media: base64Content,
@@ -92,11 +103,12 @@ async function sendWhatsAppText(phone, text) {
   if (!settings.wa_evolution_enabled) return { success: false, error: 'WA disabled' };
   const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
   const apikey = settings.wa_evolution_api_key;
-  // Normalisasi nomor: hapus spasi/dash/+, pastikan prefix 62
+  // Normalisasi nomor: hapus spasi/dash/+, pastikan prefix 62, tambah @s.whatsapp.net
   const cleaned = String(phone).replace(/[\s\-+]/g, '');
-  const number = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  const prefixed = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  const number = prefixed + '@s.whatsapp.net';
   try {
-    const res = await axios.post(url, { number, text }, { headers: { apikey }, timeout: 15000 });
+    const res = await axios.post(url, { number, text, options: { linkPreview: false } }, { headers: { apikey }, timeout: 15000 });
     logger.info(`WA text sent to ${number}: ${res.status}`);
     return { success: true, data: res.data };
   } catch (err) {

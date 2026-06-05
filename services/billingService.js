@@ -19,7 +19,7 @@ function sendPdfToWA(invoiceId, filePath) {
   const invoice = db.prepare('SELECT c.phone FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?').get(invoiceId);
   if (!invoice || !invoice.phone) return;
   
-  const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoiceId}`;
+  const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${invoiceId}`;
   
   const phone = invoice.phone.startsWith('62') ? invoice.phone : '62' + invoice.phone.replace(/^0/, '');
   const fileName = path.basename(filePath);

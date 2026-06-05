@@ -136,7 +136,7 @@
 </script>
 
   <!-- Bottom Navigation (Mobile Only) -->
-  <nav id="bottomNav" style="display:none;position:fixed;bottom:0;left:0;right:0;width:100%;z-index:999;background:var(--glass,rgba(15,23,42,0.95));backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(148,163,184,0.12);padding:8px 0 calc(8px + env(safe-area-inset-bottom, 0px));justify-content:space-around;align-items:center">
+  <nav id="bottomNav" style="display:flex;position:fixed;bottom:0;left:0;right:0;width:100%;z-index:999;background:var(--glass,rgba(15,23,42,0.95));backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(148,163,184,0.12);padding:8px 0 calc(8px + env(safe-area-inset-bottom, 0px));justify-content:space-around;align-items:center">
     <a href="/admin" class="bn-item" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;color:<%= (!activePage || activePage==='dashboard') ? '#22c55e' : 'var(--muted,#94a3b8)' %>;text-decoration:none;font-size:9px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;border:none;background:none;cursor:pointer">
       <i class="bi bi-speedometer2" style="font-size:20px"></i>
       <span>Beranda</span>
@@ -158,3 +158,26 @@
       <span>Menu</span>
     </button>
   </nav>
+  <script>
+    // Force show bottom nav on mobile — bypass ALL CSS/cache issues
+    (function() {
+      function updateNav() {
+        var nav = document.getElementById('bottomNav');
+        if (!nav) return;
+        // Show on anything <= 1024px (covers all phones + small tablets)
+        if (window.innerWidth <= 1024 || window.matchMedia('(max-width:1024px)').matches) {
+          nav.style.cssText += ';display:flex !important';
+        } else {
+          nav.style.display = 'none';
+        }
+      }
+      // Run immediately, on DOMContentLoaded, on load, on resize
+      updateNav();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateNav);
+      }
+      window.addEventListener('load', updateNav);
+      window.addEventListener('resize', updateNav);
+      window.addEventListener('orientationchange', function() { setTimeout(updateNav, 300); });
+    })();
+  </script>

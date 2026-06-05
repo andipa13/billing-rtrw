@@ -656,10 +656,8 @@ router.post('/login', async (req, res) => {
       try {
         const { sendWhatsApp } = await import('../services/evolutionService.js');
 const sendWA = sendWhatsApp;
+        logger.info(`[Webhook] Mengirim notif WA pelunasan ke ${customer.name} (${customer.phone})`);
         
-        if (false) {
-          throw new Error('Sistem WhatsApp sedang tidak aktif. Silakan hubungi Admin.');
-        }
 
         const msg = `🛡️ *KODE VERIFIKASI (OTP)*\n\nKode Anda adalah: *${otp}*\n\nJangan berikan kode ini kepada siapapun. Kode berlaku selama 5 menit.`;
         const sent = await sendWA(phone, msg);
@@ -1483,6 +1481,7 @@ router.post('/payment/callback', express.json(), async (req, res) => {
           try {
             const { sendWhatsApp } = await import('../services/evolutionService.js');
 const sendWA = sendWhatsApp;
+        logger.info(`[Webhook] Mengirim notif WA pelunasan ke ${customer.name} (${customer.phone})`);
             if (false) throw new Error('Bot WhatsApp belum terhubung');
             if (!fresh.buyer_phone) throw new Error('Nomor WhatsApp pembeli kosong');
             const msg =
@@ -1529,17 +1528,31 @@ const sendWA = sendWhatsApp;
       
       try {
         const { sendWhatsApp } = await import('../services/evolutionService.js');
-const sendWA = sendWhatsApp;
-        if (false) {
-          throw new Error('Bot WhatsApp belum terhubung');
-        }
+        const sendWA = sendWhatsApp;
+        logger.info(`[Webhook] Mengirim notif WA pelunasan ke ${customer.name} (${customer.phone})`);
         if (!customer.phone) {
-          throw new Error('Nomor WhatsApp pelanggan kosong');
+          logger.warn(`[Webhook] Nomor WA pelanggan ${customer.name} kosong, skip notif`);
+          return;
+          
         }
-        const msg = `✅ *PEMBAYARAN BERHASIL*\n\nTerima kasih Kak *${customer.name}*,\n\nPembayaran tagihan internet periode *${checkInv.period_month}/${checkInv.period_year}* telah kami terima via *${gateway}*.\n\n💰 *Total:* Rp ${checkInv.amount.toLocaleString('id-ID')}\n📅 *Waktu:* ${new Date().toLocaleString('id-ID')}\n\nStatus layanan Anda kini telah aktif. Selamat berinternet kembali! 🚀`;
-        await sendWA(customer.phone, msg);
+        const msg = `✅ *PEMBAYARAN BERHASIL*\\n\\nTerima kasih Kak *${customer.name}*,\\n\\nPembayaran tagihan internet periode *${checkInv.period_month}/${checkInv.period_year}* telah kami terima via *${gateway}*.\\n\\n💰 *Total:* Rp ${checkInv.amount.toLocaleString('id-ID')}\\n📅 *Waktu:* ${new Date().toLocaleString('id-ID')}\\n\\nStatus layanan Anda kini telah aktif. Selamat berinternet kembali! 🚀`;
+        const result = await sendWA(customer.phone, msg);
+        if (result && result.success) {
+          logger.info(`[Webhook] Notif WA pelunasan terkirim ke ${customer.phone}`);
+        } else {
+          logger.error(`[Webhook] Notif WA gagal: ${JSON.stringify(result)}`);
+          // Enqueue for retry
+          const { enqueueText } = require('../services/waQueueService');
+          enqueueText(customer.phone, msg);
+          logger.info(`[Webhook] Notif WA pelunasan di-queue untuk retry`);
+        }
       } catch (waErr) {
         logger.error(`[Webhook] Gagal kirim notif WA: ${waErr.message}`);
+        // Enqueue for retry on exception
+        const { enqueueText } = require('../services/waQueueService');
+        const msg = `✅ *PEMBAYARAN BERHASIL*\\n\\nTerima kasih Kak *${customer.name}*,\\n\\nPembayaran tagihan internet periode *${checkInv.period_month}/${checkInv.period_year}* telah kami terima via *${gateway}*.\\n\\n💰 *Total:* Rp ${checkInv.amount.toLocaleString('id-ID')}\\n📅 *Waktu:* ${new Date().toLocaleString('id-ID')}\\n\\nStatus layanan Anda kini telah aktif. Selamat berinternet kembali! 🚀`;
+        enqueueText(customer.phone, msg);
+        logger.info(`[Webhook] Notif WA pelunasan di-queue untuk retry (exception)`);
       }
 
       if (customer && customer.status === 'suspended') {

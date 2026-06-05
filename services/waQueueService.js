@@ -51,6 +51,19 @@ function enqueue(phone, filePath, caption, type = 'media') {
 }
 
 /**
+ * Add a text message to the retry queue
+ */
+function enqueueText(phone, text) {
+  const stmt = db.prepare(`
+    INSERT INTO wa_queue (phone, type, payload, caption, file_path, status)
+    VALUES (?, ?, ?, ?, ?, 'pending')
+  `);
+  const payload = JSON.stringify({ text });
+  stmt.run(phone, 'text', payload, '', '');
+  logger.info(`[WA-Queue] Enqueued text for ${phone}`);
+}
+
+/**
  * Check if Evolution API instance is connected
  */
 async function isInstanceConnected() {
@@ -73,27 +86,44 @@ async function isInstanceConnected() {
 }
 
 /**
- * Send a single queued item
+ * Send a single queued item (text or media)
  */
 async function sendQueueItem(item) {
   const settings = getSettings();
-  const url = `${settings.wa_evolution_url}/message/sendMedia/${settings.wa_evolution_instance}`;
   const headers = {
     'apikey': settings.wa_evolution_api_key,
     'Content-Type': 'application/json'
   };
 
   const data = JSON.parse(item.payload);
-  const body = {
-    number: item.phone,
-    caption: item.caption,
-    mediatype: data.mediatype,
-    media: data.base64,
-    fileName: data.fileName
-  };
+  
+  // Normalize phone: add @s.whatsapp.net
+  const cleaned = String(item.phone).replace(/[^0-9]/g, '');
+  const prefixed = cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  const number = prefixed + '@s.whatsapp.net';
 
-  const response = await axios.post(url, body, { headers, timeout: 30000 });
-  return response;
+  if (item.type === 'text') {
+    const url = `${settings.wa_evolution_url}/message/sendText/${settings.wa_evolution_instance}`;
+    const body = {
+      number: number,
+      text: data.text,
+      options: { linkPreview: false }
+    };
+    const response = await axios.post(url, body, { headers, timeout: 15000 });
+    return response;
+  } else {
+    // media
+    const url = `${settings.wa_evolution_url}/message/sendMedia/${settings.wa_evolution_instance}`;
+    const body = {
+      number: number,
+      caption: item.caption,
+      mediatype: data.mediatype,
+      media: data.base64,
+      fileName: data.fileName
+    };
+    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    return response;
+  }
 }
 
 /**
@@ -183,4 +213,4 @@ function stopWorker() {
   }
 }
 
-module.exports = { enqueue, processQueue, isInstanceConnected, getQueueStats, startWorker, stopWorker };
+module.exports = { enqueue, enqueueText, processQueue, isInstanceConnected, getQueueStats, startWorker, stopWorker };

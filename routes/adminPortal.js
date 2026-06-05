@@ -1469,15 +1469,10 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
       try {
         const lastInv = db.prepare('SELECT id FROM invoices WHERE customer_id = ? ORDER BY paid_at DESC, id DESC LIMIT 1').get(req.params.id);
         if (lastInv) {
-          const { sendWhatsAppText } = await import('../services/evolutionService.js');
-          const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastInv.id}`;
+          const { sendReceiptOrQueue } = require('../services/receiptNotifHelper');
+          const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${lastInv.id}`;
           const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
-          const waResult = await sendWhatsAppText(freshCustomer.phone, text);
-          if (waResult.success) {
-            logger.info(`[Pay] Link receipt sent to ${freshCustomer.phone} (invoice ${lastInv.id})`);
-          } else {
-            logger.error(`[Pay] Link receipt FAILED to ${freshCustomer.phone}: ${waResult.error}`);
-          }
+          await sendReceiptOrQueue(Number(req.params.id), freshCustomer.phone, text, lastInv.id);
         }
       } catch (e) {
         logger.error(`[Pay] Failed to send link receipt: ${e.message}`);
@@ -1640,21 +1635,11 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
     if (customerId) {
       const pdfCustomer = customerSvc.getCustomerById(customerId);
       if (pdfCustomer && pdfCustomer.phone) {
-        try {
-          const lastId = ids[ids.length - 1];
-          const { sendWhatsAppText } = await import('../services/evolutionService.js');
-          const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${lastId}`;
+        const lastId = ids[ids.length - 1];
+          const { sendReceiptOrQueue } = require('../services/receiptNotifHelper');
+          const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${lastId}`;
           const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
-          const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
-          if (waResult.success) {
-            logger.info(`[Pay-Bulk] Link receipt sent to ${pdfCustomer.phone} (invoice ${lastId})`);
-          } else {
-            const errStr = typeof waResult.error === 'object' ? JSON.stringify(waResult.error) : String(waResult.error);
-            logger.error(`[Pay-Bulk] Link receipt FAILED to ${pdfCustomer.phone}: ${errStr}`);
-          }
-        } catch (e2) {
-          logger.error(`[Pay-Bulk] Failed to send link: ${e2.message}`);
-        }
+          await sendReceiptOrQueue(pdfCustomer.id, pdfCustomer.phone, text, Number(lastId));
       }
     }
   } catch (e) {
@@ -1681,23 +1666,13 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
 
     req.session._msg = { type: 'success', text: 'Tagihan berhasil ditandai lunas.' };
 
-    // Kirim link bukti pelunasan ke WA pelanggan
+    // Kirim link bukti pelunasan ke WA pelanggan (with retry fallback)
     const pdfCustomer = customerSvc.getCustomerById(inv.customer_id);
     if (pdfCustomer && pdfCustomer.phone) {
-      try {
-        const { sendWhatsAppText } = await import('../services/evolutionService.js');
-        const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${req.params.id}`;
-        const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
-        const waResult = await sendWhatsAppText(pdfCustomer.phone, text);
-        if (waResult.success) {
-          logger.info(`[Pay-Single] Link receipt sent to ${pdfCustomer.phone} (invoice ${req.params.id})`);
-        } else {
-          const errStr = typeof waResult.error === 'object' ? JSON.stringify(waResult.error) : String(waResult.error);
-          logger.error(`[Pay-Single] Link receipt FAILED to ${pdfCustomer.phone}: ${errStr}`);
-        }
-      } catch (e2) {
-        logger.error(`[Pay-Single] Failed to send link: ${e2.message}`);
-      }
+      const { sendReceiptOrQueue } = require('../services/receiptNotifHelper');
+      const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${req.params.id}`;
+      const text = `Terima kasih atas pembayaran Anda.\n\nBukti pembayaran dapat diunduh di:\n${receiptUrl}\n\n*ZYA - NET* 🌐\n_Internet Stabil & Unlimited_`;
+      await sendReceiptOrQueue(inv.customer_id, pdfCustomer.phone, text, Number(req.params.id));
     }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal: ' + e.message };
@@ -3895,7 +3870,7 @@ router.get('/penagihan', requireAdminSession, (req, res) => {
     FROM customers c
     JOIN invoices i ON c.id = i.customer_id AND i.status = 'unpaid'
     LEFT JOIN packages p ON c.package_id = p.id
-    WHERE c.status IN ('active', 'suspended')
+    WHERE c.auto_isolate = 0 AND c.status IN ('active', 'suspended')
     GROUP BY c.id
     ORDER BY sisa_tagihan DESC
   `).all();
@@ -3938,11 +3913,10 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), async
     try {
       const customer = db.prepare('SELECT id, name, phone FROM customers WHERE id = ?').get(inv.customer_id);
       if (customer && customer.phone) {
-        const { sendWhatsAppText } = await import('../services/evolutionService.js');
-        const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
+        const { sendReceiptOrQueue } = require('../services/receiptNotifHelper');
+        const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
         const text = `✅ *PEMBAYARAN LUNAS* - Kasir Lapangan\n\nYth. ${customer.name},\n\nPembayaran tagihan periode ${inv.period_month}/${inv.period_year} telah diterima (${amtStr} dari Rp ${Number(inv.amount).toLocaleString('id-ID')}).\n\nBukti pembayaran:\n${receiptUrl}\n\n*ZYA - NET* 🌐`;
-        await sendWhatsAppText(customer.phone, text);
-        logger.info(`[Pay-Penagihan] Receipt sent to ${customer.phone} (invoice ${invoice_id})`);
+        await sendReceiptOrQueue(customer.id, customer.phone, text, Number(invoice_id));
       }
     } catch (e) {
       logger.error(`[Pay-Penagihan] Failed to send receipt: ${e.message}`);
@@ -3972,21 +3946,30 @@ router.post('/penagihan/lunas', requireAdminSession, express.json(), async (req,
   db.prepare("UPDATE invoices SET status = 'paid', paid_at = datetime('now', '+8 hours'), partial_paid = amount, paid_by_name = 'Kasir Lapangan', notes = COALESCE(notes, '') || ? WHERE id = ?")
     .run(noteText, invoice_id);
 
-  // Cek apakah semua invoice customer sudah lunas -> re-enable auto_isolate
+  // Cek apakah semua invoice customer sudah lunas -> activate & re-enable auto_isolate
   const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);
   if (remaining && remaining.cnt === 0) {
     db.prepare("UPDATE customers SET auto_isolate = 1 WHERE id = ? AND auto_isolate = 0").run(inv.customer_id);
+    // Jika customer suspended, activate (ganti profile MikroTik + update status)
+    const custCheck = db.prepare('SELECT id, status FROM customers WHERE id = ?').get(inv.customer_id);
+    if (custCheck && custCheck.status === 'suspended') {
+      try {
+        await customerSvc.activateCustomer(inv.customer_id);
+        logger.info(`[Pay-Penagihan] Customer ${inv.customer_id} activated (profile restored)`);
+      } catch (e) {
+        logger.error(`[Pay-Penagihan] Failed to activate customer ${inv.customer_id}: ${e.message}`);
+      }
+    }
   }
 
   // Kirim notif WA pelunasan ke pelanggan
   try {
     const customer = db.prepare('SELECT id, name, phone FROM customers WHERE id = ?').get(inv.customer_id);
     if (customer && customer.phone) {
-      const { sendWhatsAppText } = await import('../services/evolutionService.js');
-      const receiptUrl = `https://billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
-      const text = `✅ *PEMBAYARAN LUNAS* - Kasir Lapangan\n\nYth. ${customer.name},\n\nPembayaran tagihan periode ${inv.period_month}/${inv.period_year} telah diterima.\n\n💰 Rp ${Number(inv.amount).toLocaleString('id-ID')}\n\nBukti pembayaran:\n${receiptUrl}\n\n*ZYA - NET* 🌐`;
-      await sendWhatsAppText(customer.phone, text);
-      logger.info(`[Pay-Penagihan] Receipt sent to ${customer.phone} (invoice ${invoice_id})`);
+      const { sendReceiptOrQueue } = require('../services/receiptNotifHelper');
+      const receiptUrl = `billingzyandra.zyanet.cloud/customer/receipt/${invoice_id}`;
+      const text = `\u2705 *PEMBAYARAN LUNAS* - Kasir Lapangan\n\nYth. ${customer.name},\n\nPembayaran tagihan periode ${inv.period_month}/${inv.period_year} telah diterima.\n\n\U0001f4b0 Rp ${Number(inv.amount).toLocaleString('id-ID')}\n\nBukti pembayaran:\n${receiptUrl}\n\n*ZYA - NET* \U0001f310`;
+      await sendReceiptOrQueue(customer.id, customer.phone, text, Number(invoice_id));
     }
   } catch (e) {
     logger.error(`[Pay-Penagihan] Failed to send receipt: ${e.message}`);

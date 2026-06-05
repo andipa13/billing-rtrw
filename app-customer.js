@@ -371,11 +371,7 @@ logger.info(`Attempting to start server on configured port: ${port}`);
 // Mulai server dengan port dari konfigurasi
 startServer(port);
 
-if (getSetting('whatsapp_enabled', false)) {
-  import('./services/whatsappBot.mjs')
-    .then((mod) => mod.startWhatsAppBot())
-    .catch((err) => logger.error('Gagal memulai WhatsApp bot:', err));
-}
+// WhatsApp bot (Baileys) — dihapus, sekarang pakai Evolution API via evolutionService.js
 
 // Telegram bot - webhook mode (more reliable than polling)
 if (getSetting('telegram_enabled', false)) {
