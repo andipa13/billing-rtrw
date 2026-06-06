@@ -69,7 +69,7 @@ function startCronJobs() {
     try {
       const db = require('../config/database');
       const customers = db.prepare(
-        "SELECT * FROM customers WHERE status IN ('active','suspended') AND package_id IS NOT NULL"
+        "SELECT * FROM customers WHERE status = 'active' AND package_id IS NOT NULL"
       ).all();
 
       let created = 0;
@@ -257,6 +257,7 @@ function startCronJobs() {
     for (const c of customers) {
       const phone = c.phone ? String(c.phone).trim() : '';
       if (!phone || phone.length < 9) continue;
+      if (c.status !== 'active') continue;
       const unpaidCount = Number(c.unpaid_count || 0) || 0;
       if (unpaidCount <= 0) continue;
 
@@ -344,7 +345,7 @@ function startCronJobs() {
             // Simpan ke pending_notifications untuk auto-retry
             try {
               const db = require('../config/database');
-              db.prepare('INSERT INTO pending_notifications (customer_id, type, phone, message, retry_count, max_retries, error, next_retry_at) VALUES (?, ?, ?, ?, 0, 5, ?, datetime("now", "+1 hour"))').run(c.id, 'h1_reminder', c.phone, formattedMsg, errorMsg);
+              db.prepare(`INSERT INTO pending_notifications (customer_id, type, phone, message, retry_count, max_retries, error, next_retry_at) VALUES (?, ?, ?, ?, 0, 5, ?, datetime('now', '+1 hour'))`).run(c.id, 'h1_reminder', c.phone, formattedMsg, errorMsg);
               logger.info('[CRON] Disimpan ke pending_notifications untuk retry otomatis: ' + c.name);
             } catch (dbErr) { logger.error('[CRON] Gagal simpan pending: ' + dbErr.message); }
           } else {
