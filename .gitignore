@@ -35,3 +35,11 @@ send_preview.js
 # Misc
 .DS_Store
 settings.json
+
+# Root-level DB (gitignored) and stray test scripts
+/database.db
+/database.db-shm
+/database.db-wal
+send_*.py
+*.backup-*
+

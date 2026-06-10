@@ -94,6 +94,23 @@
     .srch input::placeholder{color:#555}
     .srch input:focus{border-color:#28a745}
 
+    /* ── MEASURE / OTDR ── */
+    .measure-badge{background:#facc15!important;color:#1a1a1a!important;border:none!important;font-weight:800!important;font-size:11px!important;padding:2px 7px!important;border-radius:6px!important;box-shadow:0 2px 8px rgba(0,0,0,.5)!important}
+    .measure-badge::before{display:none!important}
+    .ruler-glow{filter:drop-shadow(0 0 5px #facc15)}
+    .measure-menu{position:absolute;z-index:2200;background:rgba(15,15,15,.97);border:1px solid #333;border-radius:10px;padding:6px;display:none;box-shadow:0 12px 40px rgba(0,0,0,.7);min-width:200px}
+    .measure-menu button{display:flex;align-items:center;gap:9px;width:100%;padding:9px 12px;border:none;background:transparent;color:#eee;font-size:12px;font-weight:600;cursor:pointer;border-radius:7px;text-align:left}
+    .measure-menu button:hover{background:rgba(255,255,255,.08)}
+    .measure-menu button i{width:16px;text-align:center}
+    .otdr-panel{position:absolute;top:120px;right:20px;z-index:1600;background:rgba(15,15,15,.96);border:1px solid #8b5cf6;border-radius:12px;padding:14px;width:230px;display:none;flex-direction:column;gap:8px;box-shadow:0 12px 40px rgba(0,0,0,.7);backdrop-filter:blur(6px)}
+    .otdr-panel h4{font-size:12px;font-weight:800;color:#a78bfa;display:flex;align-items:center;gap:6px;text-transform:uppercase}
+    .otdr-row{display:flex;justify-content:space-between;font-size:11px;color:#888;align-items:center}
+    .otdr-row b{color:#eee;font-weight:700;font-size:11px;text-align:right;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .otdr-dist{font-size:22px;font-weight:800;color:#facc15;text-align:center;font-family:'Fira Code',monospace}
+    .otdr-panel input{width:100%;padding:7px 10px;border-radius:7px;border:1px solid #444;background:#0d0d0d;color:#fff;font-size:12px;outline:none}
+    .otdr-panel .ob{padding:8px;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#fff}
+    .otdr-panel .ob-find{background:#8b5cf6}.otdr-panel .ob-reset{background:#444}.otdr-panel .ob-close{background:#7f1d1d}
+    .otdr-loss{font-size:10px;color:#888;text-align:center}
     .force-hide-labels .map-label{display:none!important}
 
     @media(max-width:768px){
@@ -152,7 +169,9 @@
     <button id="btnAddOdp" onclick="toggleAddOdp()"><i class="fas fa-plus-circle"></i> Tambah ODP</button>
     <button id="btnLabel" onclick="toggleLabels()"><i class="fas fa-tags"></i> Label</button>
     <button id="btnCable" onclick="toggleCable()"><i class="fas fa-draw-polygon"></i> Kabel</button>
+    <button id="btnMeasure" onclick="toggleMeasureMenu()"><i class="fas fa-ruler-combined"></i> Ukur</button>
     <button onclick="fitAll()"><i class="fas fa-expand"></i> Fit</button>
+    <button onclick="toggleFull()"><i class="fas fa-expand-arrows-alt"></i> Layar</button>
     <button onclick="loadAll()"><i class="fas fa-sync-alt"></i> Refresh</button>
   </div>
 
@@ -179,6 +198,28 @@
         <button onclick="saveNewOdp()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#28a745;color:#fff;font-weight:700;cursor:pointer">Simpan</button>
         <button onclick="closeAddOdpModal()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#444;color:#fff;font-weight:700;cursor:pointer">Batal</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Measure submenu -->
+  <div class="measure-menu" id="measureMenu">
+    <button onclick="activateManual()"><i class="fas fa-ruler" style="color:#3b82f6"></i> Penggaris Manual</button>
+    <button onclick="activateOtdr()"><i class="fas fa-wave-square" style="color:#8b5cf6"></i> Mode OTDR (kabel)</button>
+    <button onclick="stopMeasure()"><i class="fas fa-times" style="color:#dc3545"></i> Berhenti / Hapus</button>
+  </div>
+
+  <!-- OTDR floating panel -->
+  <div class="otdr-panel" id="otdrPanel">
+    <h4><i class="fas fa-wave-square"></i> OTDR Kabel</h4>
+    <div class="otdr-row"><span>Titik 1</span><b id="otdrStartName">(pilih)</b></div>
+    <div class="otdr-row"><span>Titik 2</span><b id="otdrEndName">(pilih)</b></div>
+    <div class="otdr-dist" id="otdrTotalDist">0 m</div>
+    <div class="otdr-loss" id="otdrLoss"></div>
+    <input type="number" id="otdrInputMeters" placeholder="Cari titik gangguan (meter)">
+    <button class="ob ob-find" onclick="findOtdrFault()"><i class="fas fa-crosshairs"></i> Tandai Titik</button>
+    <div style="display:flex;gap:6px">
+      <button class="ob ob-reset" style="flex:1" onclick="resetOtdr()">Reset</button>
+      <button class="ob ob-close" style="flex:1" onclick="stopMeasure()">Tutup</button>
     </div>
   </div>
 
@@ -319,9 +360,12 @@
     updateIcon(mk,o,type);
     mk.bindPopup(popup(o,type),{maxWidth:280});
     mk.on('dblclick',()=>{}); // reserved
+    mk.on('click',()=>{if(measureMode==='otdr'){handleOtdrDeviceClick(o,type)}});
     if(type==='client'){
-      mk.on('popupopen',()=>{startTrafficPoll(o)});
+      mk.on('popupopen',()=>{if(measureMode==='otdr'){mk.closePopup();return}startTrafficPoll(o)});
       mk.on('popupclose',()=>{stopTrafficPoll()});
+    } else {
+      mk.on('popupopen',()=>{if(measureMode==='otdr')mk.closePopup()});
     }
     mk.on('dragend',e=>{
       const p=e.target.getLatLng();o.coordinates=[p.lat,p.lng];
@@ -554,6 +598,161 @@
     const f=all.find(n=>n.name&&n.name.toLowerCase().includes(q));
     if(f&&layersMap[f.id]&&layersMap[f.id].marker){map.setView(layersMap[f.id].marker.getLatLng(),19);layersMap[f.id].marker.openPopup()}
   });
+
+  // ═══════════ MEASURE / OTDR ═══════════
+  let measureMode='none'; // 'none'|'manual'|'otdr'
+  // Manual
+  let mPts=[],mLines=[],mMarks=[];
+  // OTDR
+  let otdrA=null,otdrB=null,otdrLine=null,otdrFault=null,otdrCoords=[],otdrDist=0;
+
+  function haversine(a1,o1,a2,o2){
+    const R=6371000,t=Math.PI/180;
+    const dLa=(a2-a1)*t,dLo=(o2-o1)*t;
+    const x=Math.sin(dLa/2)**2+Math.cos(a1*t)*Math.cos(a2*t)*Math.sin(dLo/2)**2;
+    return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  }
+  function fmtDist(m){return m>1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m'}
+
+  function toggleMeasureMenu(){
+    const btn=document.getElementById('btnMeasure'),menu=document.getElementById('measureMenu');
+    if(menu.style.display==='block'){menu.style.display='none';return}
+    const r=btn.getBoundingClientRect();
+    menu.style.display='block';
+    menu.style.left=Math.max(10,r.left)+'px';
+    menu.style.top=(r.top-menu.offsetHeight-10)+'px';
+  }
+  function activateManual(){
+    stopMeasure();measureMode='manual';
+    document.getElementById('measureMenu').style.display='none';
+    document.getElementById('btnMeasure').classList.add('active');
+    map.getContainer().style.cursor='crosshair';
+  }
+  function activateOtdr(){
+    stopMeasure();measureMode='otdr';
+    document.getElementById('measureMenu').style.display='none';
+    document.getElementById('btnMeasure').classList.add('active');
+    document.getElementById('otdrPanel').style.display='flex';
+    map.getContainer().style.cursor='crosshair';
+  }
+  function stopMeasure(){
+    measureMode='none';
+    document.getElementById('measureMenu').style.display='none';
+    document.getElementById('btnMeasure').classList.remove('active');
+    document.getElementById('otdrPanel').style.display='none';
+    map.getContainer().style.cursor='';
+    resetOtdr();
+    mPts=[];mLines.forEach(l=>map.removeLayer(l));mLines=[];
+    mMarks.forEach(m=>map.removeLayer(m));mMarks=[];
+  }
+
+  // ── Penggaris manual (multi-segment) ──
+  function handleManualMeasure(ll){
+    mPts.push(ll);
+    const m=L.circleMarker(ll,{radius:5,fillColor:'#facc15',color:'#1a1a1a',weight:2,fillOpacity:1,interactive:false}).addTo(map);
+    let total=0;
+    for(let i=0;i<mPts.length-1;i++)total+=haversine(mPts[i].lat,mPts[i].lng,mPts[i+1].lat,mPts[i+1].lng);
+    if(mPts.length===1){
+      m.bindTooltip('Mulai',{permanent:true,direction:'top',className:'measure-badge',offset:[0,-8]}).openTooltip();
+    }else{
+      const prev=mMarks[mMarks.length-1];if(prev&&prev.getTooltip())prev.unbindTooltip();
+      const seg=L.polyline([mPts[mPts.length-2],mPts[mPts.length-1]],{color:'#facc15',weight:4,dashArray:'10,10',className:'ruler-glow'}).addTo(map);
+      mLines.push(seg);
+      m.bindTooltip(fmtDist(total),{permanent:true,direction:'top',className:'measure-badge',offset:[0,-8]}).openTooltip();
+    }
+    mMarks.push(m);
+  }
+
+  // ── OTDR (jalur kabel mengikuti hirarki ODP) ──
+  function pathToRoot(node){
+    const path=[],seen=new Set();let cur=node;
+    while(cur){
+      if(seen.has(cur.id))break;seen.add(cur.id);path.push(cur);
+      if(cur.id==='router')break;
+      cur=findNode(cur.parent||'router');
+    }
+    return path;
+  }
+  function handleOtdrDeviceClick(d,type){
+    if(measureMode!=='otdr')return;
+    if(!otdrA){otdrA=d;document.getElementById('otdrStartName').innerText=d.name}
+    else if(!otdrB&&d.id!==otdrA.id){otdrB=d;document.getElementById('otdrEndName').innerText=d.name;calcOtdr()}
+    else{resetOtdr();otdrA=d;document.getElementById('otdrStartName').innerText=d.name}
+  }
+  function calcOtdr(){
+    if(!otdrA||!otdrB)return;
+    const pA=pathToRoot(otdrA),pB=pathToRoot(otdrB);
+    let lca=null;
+    for(const na of pA){if(pB.find(x=>x.id===na.id)){lca=na;break}}
+    if(!lca){alert('Kedua titik tidak berada di jalur kabel yang sama (beda induk).');resetOtdr();return}
+    const coords=[];
+    const idxA=pA.findIndex(x=>x.id===lca.id);
+    // dari titik A naik ke LCA (kabel anak mengarah ke induk → balik urutan cable_path)
+    for(let i=0;i<idxA;i++){
+      const ch=pA[i];if(!ch.coordinates)continue;
+      coords.push(L.latLng(ch.coordinates[0],ch.coordinates[1]));
+      if(ch.cable_path&&ch.cable_path.length){for(let k=ch.cable_path.length-1;k>=0;k--)coords.push(L.latLng(ch.cable_path[k][0],ch.cable_path[k][1]))}
+    }
+    if(lca.coordinates)coords.push(L.latLng(lca.coordinates[0],lca.coordinates[1]));
+    // dari LCA turun ke titik B
+    const idxB=pB.findIndex(x=>x.id===lca.id);
+    for(let i=idxB-1;i>=0;i--){
+      const ch=pB[i];if(!ch.coordinates)continue;
+      if(ch.cable_path&&ch.cable_path.length){for(let k=0;k<ch.cable_path.length;k++)coords.push(L.latLng(ch.cable_path[k][0],ch.cable_path[k][1]))}
+      coords.push(L.latLng(ch.coordinates[0],ch.coordinates[1]));
+    }
+    otdrDist=0;
+    for(let i=0;i<coords.length-1;i++)otdrDist+=haversine(coords[i].lat,coords[i].lng,coords[i+1].lat,coords[i+1].lng);
+    otdrCoords=coords;
+    document.getElementById('otdrTotalDist').innerText=fmtDist(otdrDist);
+    // estimasi redaman ~0.35 dB/km + 0.3 dB/sambungan
+    const hops=Math.max(0,pA.length-1-idxA)+Math.max(0,idxB);
+    const loss=(otdrDist/1000*0.35)+(hops*0.3);
+    document.getElementById('otdrLoss').innerText='≈ '+loss.toFixed(2)+' dB ('+hops+' sambungan)';
+    if(otdrLine)map.removeLayer(otdrLine);
+    otdrLine=L.polyline(coords,{color:'#facc15',weight:4,dashArray:'10,10',className:'ruler-glow',pane:'markers'}).addTo(map);
+    if(coords.length)map.fitBounds(otdrLine.getBounds(),{padding:[80,80]});
+  }
+  function findOtdrFault(){
+    if(otdrCoords.length<2)return alert('Pilih 2 titik dulu.');
+    const target=parseFloat(document.getElementById('otdrInputMeters').value);
+    if(isNaN(target)||target<0)return alert('Masukkan jarak (meter) yang valid.');
+    if(target>otdrDist)return alert('Jarak melebihi total jalur ('+Math.round(otdrDist)+' m).');
+    let run=0,pt=null;
+    for(let i=0;i<otdrCoords.length-1;i++){
+      const p1=otdrCoords[i],p2=otdrCoords[i+1];
+      const seg=haversine(p1.lat,p1.lng,p2.lat,p2.lng);
+      if(run+seg>=target){
+        const ratio=seg?(target-run)/seg:0;
+        pt=L.latLng(p1.lat+(p2.lat-p1.lat)*ratio,p1.lng+(p2.lng-p1.lng)*ratio);break;
+      }
+      run+=seg;
+    }
+    if(!pt)pt=otdrCoords[otdrCoords.length-1];
+    if(otdrFault)map.removeLayer(otdrFault);
+    otdrFault=L.marker(pt,{zIndexOffset:9000,icon:L.divIcon({className:'',html:'<div style="font-size:30px;color:#ef4444;filter:drop-shadow(0 0 10px #ef4444)"><i class="fas fa-map-marker-alt"></i></div>',iconSize:[30,30],iconAnchor:[15,30]})}).addTo(map);
+    otdrFault.bindPopup('<b style="color:#ef4444">Titik gangguan: '+target+' m</b>').openPopup();
+    map.setView(pt,19,{animate:true});
+  }
+  function resetOtdr(){
+    otdrA=null;otdrB=null;otdrCoords=[];otdrDist=0;
+    if(otdrLine){map.removeLayer(otdrLine);otdrLine=null}
+    if(otdrFault){map.removeLayer(otdrFault);otdrFault=null}
+    const sn=document.getElementById('otdrStartName');if(sn)sn.innerText='(pilih)';
+    const en=document.getElementById('otdrEndName');if(en)en.innerText='(pilih)';
+    const td=document.getElementById('otdrTotalDist');if(td)td.innerText='0 m';
+    const ls=document.getElementById('otdrLoss');if(ls)ls.innerText='';
+    const im=document.getElementById('otdrInputMeters');if(im)im.value='';
+  }
+
+  // ── Fullscreen ──
+  function toggleFull(){
+    if(!document.fullscreenElement){(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen).call(document.documentElement)}
+    else{(document.exitFullscreen||document.webkitExitFullscreen).call(document)}
+  }
+
+  // klik peta utk penggaris manual
+  map.on('click',e=>{if(measureMode==='manual')handleManualMeasure(e.latlng)});
 
   loadAll();setInterval(loadAll,30000);
   </script>

@@ -1344,13 +1344,21 @@ router.get('/payment/create/:invoiceId', async (req, res) => {
 
 /**
  * Webhook Callback (Multi-Gateway)
+ * Gunakan express.raw() dulu untuk menangkap body mentah sebelum parsing JSON
+ * agar signature Tripay bisa diverifikasi dari JSON asli (urutan key penting)
  */
-router.post('/payment/callback', express.json(), async (req, res) => {
+router.post('/payment/callback', express.raw({type: 'application/json'}), async (req, res) => {
   const settings = getSettingsWithCache();
   const tripaySignature = req.headers['x-callback-signature'];
-  const midtransSignature = req.headers['x-callback-token']; // Midtrans usually uses Basic Auth or IP whitelist, but let's check payload
+  const midtransSignature = req.headers['x-callback-token'];
   
-  const jsonBody = JSON.stringify(req.body);
+  // Simpan raw body untuk verifikasi signature Tripay (urutan key harus persis)
+  const rawBody = req.body.toString('utf-8');
+  
+  // Parse JSON untuk akses objek
+  try { req.body = JSON.parse(rawBody); } catch (e) { req.body = {}; }
+  
+  const jsonBody = rawBody;
   let gatewayOrderId = null;
   let invoiceIdCandidate = null;
   let status = null;

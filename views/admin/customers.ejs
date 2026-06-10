@@ -219,7 +219,7 @@
           <div class="fg" style="max-width:200px">
             <label class="fl">Profile Isolir / Address List</label>
             <select class="fs" name="isolir_profile" id="add_isolir_select">
-              <option value="isolir">isolir</option>
+              <option value="ISOLIR-1-SEGMEN" selected>ISOLIR-1-SEGMEN</option>
             </select>
           </div>
         </div>
@@ -244,7 +244,7 @@
           </div>
           <div class="fg">
             <label class="fl">Tanggal Isolir (1-31)</label>
-            <input class="fc" type="number" name="isolate_day" value="10" min="1" max="31">
+            <input class="fc" type="number" name="isolate_day" value="<%= new Date().getDate() %>" min="1" max="31">
           </div>
         </div>
         <div class="form-row">
@@ -384,7 +384,7 @@
           <div class="fg" style="max-width:200px">
             <label class="fl">Profile Isolir / Address List</label>
             <select class="fs" name="isolir_profile" id="e_isolir_profile">
-              <option value="isolir">isolir</option>
+              <option value="ISOLIR-1-SEGMEN">ISOLIR-1-SEGMEN</option>
             </select>
           </div>
         </div>
@@ -695,7 +695,7 @@ function editCust(idx) {
   document.getElementById('e_pon_port').value=c.pon_port||'';
   document.getElementById('e_lat').value=c.lat||'';
   document.getElementById('e_lng').value=c.lng||'';
-  document.getElementById('e_isolir_profile').value=c.isolir_profile||'isolir';
+  document.getElementById('e_isolir_profile').value=c.isolir_profile||'ISOLIR-1-SEGMEN';
   document.getElementById('e_status').value=c.status||'active';
   document.getElementById('e_install').value=c.install_date||'';
   document.getElementById('e_notes').value=c.notes||'';
@@ -866,12 +866,12 @@ async function loadMikrotikProfiles(routerId = '') {
     const selAdd = document.getElementById('add_isolir_select');
     const selEdit = document.getElementById('e_isolir_profile');
     
-    const defaultOpt = '<option value="isolir">isolir</option>';
+    const defaultOpt = '<option value="ISOLIR-1-SEGMEN" selected>ISOLIR-1-SEGMEN</option>';
     selAdd.innerHTML = defaultOpt;
     selEdit.innerHTML = defaultOpt;
 
     profiles.forEach(p => {
-      if(p.name === 'isolir') return;
+      if(p.name === 'ISOLIR-1-SEGMEN') return;
       const opt = `<option value="${p.name}">${p.name}</option>`;
       selAdd.innerHTML += opt;
       selEdit.innerHTML += opt;

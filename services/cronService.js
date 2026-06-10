@@ -74,7 +74,7 @@ function startCronJobs() {
 
       let created = 0;
       for (const c of customers) {
-        const dueDay = Number(c.isolate_day) || Number(getSetting('isolir_day', 10)) || 10;
+        const dueDay = Number(c.isolate_day) || Number(getSetting('isolir_day', 1)) || 1;
         // H-1 sebelum isolir — handle wrap-around untuk isolate_day=1
         let h1;
         if (dueDay === 1) {
@@ -178,21 +178,35 @@ function startCronJobs() {
 
     for (const c of customers) {
       // Cek apakah isolir otomatis aktif untuk user ini dan hari ini adalah tanggal isolirnya
-      const customerIsolirDay = c.isolate_day || 10;
+      const customerIsolirDay = c.isolate_day || 1;
       const isAutoIsolateEnabled = c.auto_isolate !== 0; // default aktif jika null/1
 
       if (isAutoIsolateEnabled && today === customerIsolirDay) {
         // Jika pelanggan aktif tapi punya tagihan belum bayar
         if (c.status === 'active' && c.unpaid_count > 0) {
-          try {
-            logger.info(`[CRON] Isolir otomatis pelanggan: ${c.name} (${c.pppoe_username}) - Tanggal Tagihan: ${customerIsolirDay}`);
-            
-            // Gunakan fungsi terpusat untuk isolir
-            await customerSvc.suspendCustomer(c.id);
-            
-            isolatedCount++;
-          } catch (err) {
-            logger.error(`[CRON] Gagal isolir ${c.name}: ${err.message}`);
+          let attempt = 0;
+          const maxAttempts = 3;
+          let lastErr = null;
+          while (++attempt <= maxAttempts) {
+            try {
+              logger.info(`[CRON] Isolir otomatis pelanggan: ${c.name} (${c.pppoe_username}) - Tanggal Tagihan: ${customerIsolirDay}`);
+              // Gunakan fungsi terpusat untuk isolir
+              await customerSvc.suspendCustomer(c.id);
+              isolatedCount++;
+              lastErr = null;
+              break; // success
+            } catch (err) {
+              lastErr = err;
+              logger.error(`[CRON] Gagal isolir ${c.name} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
+              if (attempt < maxAttempts) {
+                const delay = attempt * 5 * 1000; // 5s, 10s, 15s
+                logger.info(`[CRON] Retry in ${delay/1000}s...`);
+                await new Promise(r => setTimeout(r, delay));
+              }
+            }
+          }
+          if (lastErr) {
+            logger.error(`[CRON] Gagal isolir ${c.name} setelah ${maxAttempts} attempts: ${lastErr.message}`);
           }
         }
       }
@@ -261,7 +275,7 @@ function startCronJobs() {
       const unpaidCount = Number(c.unpaid_count || 0) || 0;
       if (unpaidCount <= 0) continue;
 
-      const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 10) || 10) || 10;
+      const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 1) || 1) || 1;
       const remind1 = dueDay - 1;
       const shouldSend = remind1 >= 1 && day === remind1;
       if (!shouldSend) continue;
@@ -293,7 +307,7 @@ function startCronJobs() {
           const rincianBulan = unpaidInvoices.map(inv => `${inv.period_month}/${inv.period_year}`).join(', ');
 
           // Format pesan dengan variation untuk anti-spam
-          const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 10) || 10) || 10;
+          const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 1) || 1) || 1;
           let formattedMsg = template
             .replace(/{{nama}}/gi, c.name || 'Pelanggan')
             .replace(/{{tagihan}}/gi, totalTagihan.toLocaleString('id-ID'))
@@ -386,6 +400,7 @@ function startCronJobs() {
 
       for (const c of customers) {
         if (!c.package_id || !c.pppoe_username) continue;
+        if (c.status === 'suspended') continue; // SKIP user suspended (sudah isolir)
         
         const pkg = customerSvc.getPackageById(c.package_id);
         if (pkg && pkg.use_night_speed === 1 && pkg.night_profile_name) {
@@ -413,6 +428,7 @@ function startCronJobs() {
 
       for (const c of customers) {
         if (!c.package_id || !c.pppoe_username) continue;
+        if (c.status === 'suspended') continue; // SKIP user suspended (sudah isolir)
 
         const pkg = customerSvc.getPackageById(c.package_id);
         if (pkg && pkg.use_night_speed === 1) {

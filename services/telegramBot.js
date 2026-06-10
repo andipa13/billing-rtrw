@@ -190,7 +190,7 @@ function initTelegram() {
           name: d.pppoe_username,
           password: 'rumah',
           service: 'pppoe',
-          profile: d.package_name || 'default',
+          profile: d.package_name || 'ISOLIR-1-SEGMEN',
           'local-address': localIp,
           'remote-address': nextIp
         }, routerId);
@@ -229,6 +229,8 @@ function initTelegram() {
       msg += `🌐 IP: \`${allocatedIp || '-'}\`\n`;
       msg += `🔒 Password: \`rumah\`\n`;
       msg += `📅 Install: ${todayStr}\n`;
+      msg += `🛡️ Profile Isolir: ISOLIR-1-SEGMEN\n`;
+      msg += `📆 Tgl Isolir: ${todayDay}\n`;
       msg += existsInMt ? `\n⚠️ Secret sudah ada di MikroTik, IP diambil dari sana.` : `\n✅ PPPoE secret berhasil dibuat di MikroTik.`;
 
       bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
@@ -274,6 +276,7 @@ function initTelegram() {
         reply_markup: {
           inline_keyboard: [
             [{ text: '➕ Tambah Pelanggan', callback_data: 'cust_add' }],
+            [{ text: '📋 List Pelanggan', callback_data: 'cust_list' }],
             [{ text: '🔍 Cari Pelanggan', callback_data: 'cust_search' }],
             [{ text: '🚫 Daftar Terisolir', callback_data: 'cust_suspended' }],
             [{ text: '📡 List ONU (GenieACS)', callback_data: 'cust_listonu' }],
@@ -281,6 +284,63 @@ function initTelegram() {
           ]
         }
       });
+    }
+    else if (data === 'cust_chgpkg' || data === 'cust_list' || data.startsWith('cust_list_')) {
+      const page = data.startsWith('cust_list_') ? parseInt(data.replace('cust_list_', '')) || 0 : 0;
+      const pageSize = 25;
+      const allCustomers = customerSvc.getAllCustomers().filter(c => c.status === 'active' && c.pppoe_username);
+      if (allCustomers.length === 0) return bot.sendMessage(chatId, '📭 Tidak ada pelanggan aktif.');
+      
+      const totalPages = Math.ceil(allCustomers.length / pageSize);
+      const customers = allCustomers.slice(page * pageSize, (page + 1) * pageSize);
+      
+      const buttons = customers.map(c => ([{
+        text: `${c.name} (${c.package_name || 'no pkg'})`,
+        callback_data: `chgpkg_${c.id}`
+      }]));
+      
+      if (page > 0) buttons.push([{ text: '◀️ Prev', callback_data: `cust_list_${page - 1}` }]);
+      if (page < totalPages - 1) buttons.push([{ text: '▶️ Next', callback_data: `cust_list_${page + 1}` }]);
+      buttons.push([{ text: '⬅️ Kembali', callback_data: 'menu_cust' }]);
+      
+      bot.sendMessage(chatId, `📋 *LIST PELANGGAN AKTIF* (${allCustomers.length} total)\n_Halaman ${page + 1}/${totalPages}_\n\nPilih pelanggan untuk ubah paket:`, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      });
+    }
+    else if (data.startsWith('chgpkg_')) {
+      const custId = data.replace('chgpkg_', '');
+      const customer = customerSvc.getCustomerById(custId);
+      if (!customer) return bot.sendMessage(chatId, '❌ Pelanggan tidak ditemukan.');
+      
+      const packages = customerSvc.getAllPackages();
+      const buttons = packages.map((p, i) => ([{
+        text: `${p.name} — Rp ${Number(p.price).toLocaleString('id-ID')}`,
+        callback_data: `setpkg_${customer.id}_${p.id}`
+      }]));
+      buttons.push([{ text: '⬅️ Kembali', callback_data: 'cust_list' }]);
+      
+      bot.sendMessage(chatId, `📦 *UBAH PAKET*\n\n👤 ${customer.name}\n📦 Paket saat ini: *${customer.package_name || 'Tidak ada'}*\n\nPilih paket baru:`, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons }
+      });
+    }
+    else if (data.startsWith('setpkg_')) {
+      const [, custId, pkgId] = data.split('_');
+      const customer = customerSvc.getCustomerById(custId);
+      const newPkg = customerSvc.getPackageById(pkgId);
+      if (!customer || !newPkg) return bot.sendMessage(chatId, '❌ Data tidak ditemukan.');
+      
+      try {
+        db.prepare('UPDATE customers SET package_id = ? WHERE id = ?').run(newPkg.id, customer.id);
+        await mikrotikSvc.setPppoeProfile(customer.pppoe_username, newPkg.name);
+        bot.sendMessage(chatId, 
+          `✅ *PAKET BERHASIL DIUBAH*\n\n👤 ${customer.name}\n📦 ${customer.package_name || 'Tidak ada'} → *${newPkg.name}*\n💰 Rp ${Number(newPkg.price).toLocaleString('id-ID')}`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (e) {
+        bot.sendMessage(chatId, '❌ Gagal: ' + e.message);
+      }
     }
 
     else if (data === 'menu_bill') {
@@ -655,6 +715,51 @@ function initTelegram() {
       bot.sendMessage(msg.chat.id, `✅ Profile *${user}* diubah ke *${profile}*.`);
     } catch (e) {
       bot.sendMessage(msg.chat.id, 'Gagal: ' + e.message);
+    }
+  });
+
+  bot.onText(/\/ubhpaket (\S+)(?:\s+(\d+))?/, async (msg, match) => {
+    if (!isAdmin(msg)) return;
+    try {
+      const [_, username, paketIdx] = match;
+      
+      // Find customer by pppoe_username
+      const customer = db.prepare('SELECT * FROM customers WHERE pppoe_username = ?').get(username);
+      if (!customer) return bot.sendMessage(msg.chat.id, `❌ Username *${username}* tidak ditemukan.`);
+      
+      // Get all packages
+      const packages = customerSvc.getAllPackages();
+      
+      // If no package index provided, show package list
+      if (!paketIdx) {
+        let pkgText = `*📦 UBAH PAKET - ${customer.name}*\n\nPaket saat ini: *${customer.package_name || 'Tidak ada'}*\n\nPilih paket baru:\n\n`;
+        packages.forEach((p, i) => {
+          pkgText += `${i + 1}. ${p.name} — Rp ${Number(p.price).toLocaleString('id-ID')}\n`;
+        });
+        pkgText += `\nKetik: /ubhpaket ${username} <nomor>`;
+        return bot.sendMessage(msg.chat.id, pkgText, { parse_mode: 'Markdown' });
+      }
+      
+      // Validate package selection
+      const idx = parseInt(paketIdx) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= packages.length) {
+        return bot.sendMessage(msg.chat.id, `⚠️ Nomor paket tidak valid. Pilih 1-${packages.length}`);
+      }
+      
+      const newPkg = packages[idx];
+      
+      // Update customer in DB
+      db.prepare('UPDATE customers SET package_id = ? WHERE id = ?').run(newPkg.id, customer.id);
+      
+      // Update MikroTik profile
+      await mikrotikSvc.setPppoeProfile(username, newPkg.name);
+      
+      bot.sendMessage(msg.chat.id, 
+        `✅ *PAKET BERHASIL DIUBAH*\n\n👤 ${customer.name}\n📦 ${customer.package_name || 'Tidak ada'} → *${newPkg.name}*\n💰 Rp ${Number(newPkg.price).toLocaleString('id-ID')}`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (e) {
+      bot.sendMessage(msg.chat.id, '❌ Gagal: ' + e.message);
     }
   });
 

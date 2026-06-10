@@ -224,6 +224,37 @@ async function createVoucherBatchAsync(batchId) {
     return { userCode, passCode };
   };
 
+  // ── Expire-monitor helpers ────────────────────────────────────────────
+  // Convert Mikhmon-style validity string ("12h", "1d", "1w", "4w2d", "30m") → ms
+  function validityToMs(v) {
+    if (!v) return 0;
+    const s = String(v).trim().toLowerCase();
+    let totalMin = 0;
+    const re = /(\d+)\s*([wdhm])/g;
+    let m;
+    let matched = false;
+    while ((m = re.exec(s)) !== null) {
+      matched = true;
+      const n = parseInt(m[1], 10);
+      if (m[2] === 'm') totalMin += n;             // minutes
+      else if (m[2] === 'h') totalMin += n * 60;    // hours
+      else if (m[2] === 'd') totalMin += n * 1440;  // days
+      else if (m[2] === 'w') totalMin += n * 10080; // weeks
+    }
+    if (!matched) {
+      // bare number → assume hours (Mikhmon default)
+      const n = parseInt(s, 10);
+      if (!isNaN(n)) totalMin = n * 60;
+    }
+    return totalMin * 60 * 1000;
+  }
+
+  // Format Date → "YYYY-MM-DD HH:MM:SS" (Expire Monitor compatible: script's $convert handles "-")
+  function formatExpireMonitorDate(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
   const poolLimit = 8;
   let idx = 0;
 
@@ -241,7 +272,12 @@ async function createVoucherBatchAsync(batchId) {
         }
 
         try {
-          const comment = `vc-${generated.userCode}-${batch.profile_name}`;
+          // Expire monitor expects comment format: "YYYY-MM-DD HH:MM:SS" or "MMM/DD/YYYY HH:MM:SS" + optional mode flag.
+          // Build expiry = created_at (now) + batch.validity, e.g. validity="12h" → +12 hours.
+          const createdAt = new Date();
+          const expiresAt = new Date(createdAt.getTime() + validityToMs(batch.validity));
+          const expStr = formatExpireMonitorDate(expiresAt); // "2026-06-10 23:59:59"
+          const comment = `vc-${generated.userCode}-${batch.profile_name} ${expStr}`;
           const userData = {
             server: 'all',
             name: generated.userCode,
@@ -249,6 +285,7 @@ async function createVoucherBatchAsync(batchId) {
             profile: batch.profile_name,
             comment
           };
+          // Keep limit-uptime as hard cap too (catches users who never expire via comment)
           if (batch.validity) userData['limit-uptime'] = batch.validity;
 
           await mikrotikService.addHotspotUser(userData, routerId);
@@ -1146,10 +1183,11 @@ router.post('/customers', requireAdminSession, express.urlencoded({ extended: tr
         const localIp = pool ? pool.gateway : '192.168.55.1';
 
         // Determine profile from package
-        let profileName = 'default';
+        // Default: ISOLIR-1-SEGMEN ( isolate_day default dari createCustomer = day of install_date )
+        let profileName = req.body.isolir_profile || 'ISOLIR-1-SEGMEN';
         if (req.body.status === 'suspended' || req.body.status === 'isolir') {
           profileName = 'ISOLIR-1-SEGMEN';
-        } else if (req.body.package_id) {
+        } else if (req.body.package_id && req.body.status === 'active') {
           const pkg = customerSvc.getPackageById(req.body.package_id);
           if (pkg) profileName = pkg.name;
         }

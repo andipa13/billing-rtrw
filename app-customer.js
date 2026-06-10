@@ -8,6 +8,24 @@ const customerSvc = require('./services/customerService');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { scheduleAutoBackup } = require('./services/backupService');
 
+// --- Fix node-routeros !empty crash ---
+// Monkey-patch Channel.onUnknown to prevent uncaughtException crash
+// when MikroTik returns unexpected response (e.g. "!empty")
+try {
+  const { Channel } = require('node-routeros/dist/Channel.js');
+  const origOnUnknown = Channel.prototype.onUnknown;
+  Channel.prototype.onUnknown = function(reply) {
+    logger.error(`[MikroTik] Channel received unknown reply: ${reply}`);
+    // Close channel gracefully instead of throwing
+    this.close();
+    // Emit a proper error so the calling code can handle it
+    this.emit('error', new Error(`MikroTik unknown reply: ${reply}`));
+  };
+} catch (e) {
+  // If patch fails, uncaughtException handler below still acts as safety net
+  logger.warn('Could not patch node-routeros Channel.onUnknown:', e.message);
+}
+
 // Prefer IPv4 to avoid AggregateError (IPv6 timeouts) on some servers
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');

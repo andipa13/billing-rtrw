@@ -3,6 +3,31 @@ const { getSettingsWithCache } = require('../config/settingsManager');
 const { logger } = require('../config/logger');
 const db = require('../config/database');
 
+// Convert camelCase keys to kebab-case for MikroTik API
+function toMikrotikKeys(obj) {
+  const map = {
+    callerId: 'caller-id',
+    remoteAddress: 'remote-address',
+    localAddress: 'local-address',
+    ipv6Routes: 'ipv6-routes',
+    limitBytesIn: 'limit-bytes-in',
+    limitBytesOut: 'limit-bytes-out',
+    lastLoggedOut: 'last-logged-out',
+    service: 'service',
+    profile: 'profile',
+    password: 'password',
+    name: 'name',
+    comment: 'comment',
+    disabled: 'disabled',
+    routes: 'routes',
+  };
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[map[k] || k] = v;
+  }
+  return out;
+}
+
 async function getConnection(routerId = null) {
   let host, port, user, password;
 
@@ -115,8 +140,18 @@ async function setPppoeProfile(username, profileName, routerId = null) {
     // Hanya update dan kick jika profil berubah
     if (currentProfile !== profileName) {
       logger.info(`[MikroTik] Changing profile for ${username}: ${currentProfile} -> ${profileName}`);
-      await secretMenu.set({ profile: profileName }, secretId);
-      
+      // Use delete+add instead of set to avoid MikroTik API bug corrupting records
+      // Exclude internal, read-only, and system fields
+      const READONLY = ['.id', 'id', '$$path', 'last-logged-out', 'lastLoggedOut', 'caller-id', 'callerId'];
+      const newSecret = {};
+      for (const [k, v] of Object.entries(secret)) {
+        if (READONLY.includes(k) || k.startsWith('$$')) continue;
+        newSecret[k] = v;
+      }
+      newSecret.profile = profileName;
+      // Remove old record first ( MikroTik rejects add if name already exists)
+      await secretMenu.remove(secretId);
+      await secretMenu.add(toMikrotikKeys(newSecret));
       // Disconnect active connection so they reconnect with new profile
       await kickPppoeUser(username, routerId);
     } else {
