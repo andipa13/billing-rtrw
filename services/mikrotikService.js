@@ -125,9 +125,14 @@ async function setPppoeProfile(username, profileName, routerId = null) {
     conn = await getConnection(routerId);
     const secretMenu = conn.client.menu('/ppp/secret');
     const secrets = await secretMenu.where('name', username).get();
-    
+
     if (!secrets || secrets.length === 0) {
-      throw new Error(`PPPoE User ${username} not found in MikroTik`);
+      // Secret missing on MikroTik (e.g. failed earlier delete, or never added).
+      // Log warning dan return false (idempotent) — caller (activateCustomer) bisa
+      // re-add via addPppoeSecret kalau perlu. Untuk suspendCustomer, skip saja
+      // dan biarkan caller handle.
+      logger.warn(`[MikroTik] setPppoeProfile: PPPoE secret "${username}" not found in MikroTik, skipping.`);
+      return false;
     }
 
     const secret = secrets[0];
@@ -142,7 +147,7 @@ async function setPppoeProfile(username, profileName, routerId = null) {
       logger.info(`[MikroTik] Changing profile for ${username}: ${currentProfile} -> ${profileName}`);
       // Use delete+add instead of set to avoid MikroTik API bug corrupting records
       // Exclude internal, read-only, and system fields
-      const READONLY = ['.id', 'id', '$$path', 'last-logged-out', 'lastLoggedOut', 'caller-id', 'callerId'];
+      const READONLY = ['.id', 'id', '$$path', 'last-logged-out', 'lastLoggedOut', 'caller-id', 'callerId', 'last-caller-id', 'lastCallerId', 'last-disconnect-reason', 'lastDisconnectReason', 'last-updated', 'lastUpdated'];
       const newSecret = {};
       for (const [k, v] of Object.entries(secret)) {
         if (READONLY.includes(k) || k.startsWith('$$')) continue;
@@ -566,7 +571,7 @@ async function setupIsolirFirewall(routerId = null) {
     if (existingNat.length === 0) {
       await natMenu.add({
         chain: 'dstnat',
-        'src-address-list': 'LIST_ISOLIR',
+        'src-address-list': 'ISOLIR-1-SEGMEN',
         protocol: 'tcp',
         'dst-port': '80',
         action: 'redirect',
@@ -581,7 +586,7 @@ async function setupIsolirFirewall(routerId = null) {
     if (existingFilter.length === 0) {
       await filterMenu.add({
         chain: 'forward',
-        'src-address-list': 'LIST_ISOLIR',
+        'src-address-list': 'ISOLIR-1-SEGMEN',
         action: 'drop',
         comment: 'BLOCK_ISOLIR'
       });
@@ -596,16 +601,37 @@ async function setupIsolirFirewall(routerId = null) {
   }
 }
 
+// REST API helper for MikroTik (avoids node-routeros "!empty reply" bug on queue/simple & address-list)
+async function restApi(path, method = 'GET', body = null) {
+  let host, port, user, password;
+  // Default to settings.mikrotik_host (we only have one router — 10.10.10.1 — in production)
+  const settings = getSettingsWithCache();
+  host = settings.mikrotik_host;
+  port = settings.mikrotik_rest_port || 80; // RouterOS REST runs on port 80 by default
+  user = settings.mikrotik_user;
+  password = settings.mikrotik_password;
+  if (!host || !user) throw new Error('MikroTik settings not configured');
+  const auth = Buffer.from(`${user}:${password}`).toString('base64');
+  const url = `http://${host}:${port}${path}`;
+  const opts = { method, headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`MikroTik REST ${method} ${path} failed: ${r.status} ${txt}`);
+  }
+  const ct = r.headers.get('content-type') || '';
+  if (ct.includes('json')) return r.json();
+  return r.text();
+}
+
 async function manageStaticIp(data, routerId = null) {
   const { ip, name, limit, isolate } = data;
-  let conn = null;
   try {
-    conn = await getConnection(routerId);
-    
-    // 1. Manage Simple Queue for Bandwidth
-    const queueMenu = conn.client.menu('/queue/simple');
-    const existingQueue = await queueMenu.where('target', `${ip}/32`).get();
-    
+    // 1. Manage Simple Queue for Bandwidth (via REST API — avoids node-routeros !empty bug)
+    const queues = await restApi('/rest/queue/simple', 'GET');
+    const existingQueue = (queues || []).find(q => q.target === `${ip}/32`);
+
     const queueData = {
       name: `CUST-${name}`,
       target: `${ip}/32`,
@@ -613,23 +639,23 @@ async function manageStaticIp(data, routerId = null) {
       comment: `Managed by Billing - ${name}`
     };
 
-    if (existingQueue.length > 0) {
-      await queueMenu.set(queueData, existingQueue[0]['.id']);
+    if (existingQueue) {
+      await restApi('/rest/queue/simple/' + existingQueue['.id'], 'PATCH', queueData);
     } else {
-      await queueMenu.add(queueData);
+      await restApi('/rest/queue/simple', 'PUT', queueData);
     }
 
-    // 2. Manage Address List for Isolation
-    const addrListMenu = conn.client.menu('/ip/firewall/address-list');
-    const existingEntry = await addrListMenu.where('address', ip).where('list', 'LIST_ISOLIR').get();
+    // 2. Manage Address List for Isolation (via REST API)
+    const allAddr = await restApi('/rest/ip/firewall/address-list', 'GET');
+    const existingEntry = (allAddr || []).find(e => e.address === ip && e.list === 'ISOLIR-1-SEGMEN');
 
     if (isolate) {
-      if (existingEntry.length === 0) {
-        await addrListMenu.add({ list: 'LIST_ISOLIR', address: ip, comment: name });
+      if (!existingEntry) {
+        await restApi('/rest/ip/firewall/address-list', 'PUT', { list: 'ISOLIR-1-SEGMEN', address: ip, comment: name });
       }
     } else {
-      if (existingEntry.length > 0) {
-        await addrListMenu.remove(existingEntry[0]['.id']);
+      if (existingEntry) {
+        await restApi('/rest/ip/firewall/address-list/' + existingEntry['.id'], 'DELETE');
       }
     }
 
@@ -637,8 +663,6 @@ async function manageStaticIp(data, routerId = null) {
   } catch (e) {
     logger.error('Error manageStaticIp:', e);
     throw e;
-  } finally {
-    if (conn && conn.api) conn.api.close();
   }
 }
 
@@ -652,14 +676,78 @@ async function removeStaticIp(ip, routerId = null) {
     const queues = await queueMenu.where('target', `${ip}/32`).get();
     for (const q of queues) await queueMenu.remove(q['.id']);
 
-    // Remove from Address List
+    // Remove from Address List (filter manual)
     const addrListMenu = conn.client.menu('/ip/firewall/address-list');
-    const entries = await addrListMenu.where('address', ip).where('list', 'LIST_ISOLIR').get();
-    for (const e of entries) await addrListMenu.remove(e['.id']);
+    const allAddr = await addrListMenu.get();
+    const entries = allAddr.filter(e => e.address === ip && e.list === 'ISOLIR-1-SEGMEN');
+    for (const e of entries) {
+      const eid = e['.id'] || e.id;
+      if (!eid) continue;
+      try {
+        await addrListMenu.remove(eid);
+      } catch (innerErr) {
+        if (!/no such item/i.test(innerErr.message)) throw innerErr;
+      }
+    }
 
     return true;
   } catch (e) {
     logger.error('Error removeStaticIp:', e);
+    throw e;
+  } finally {
+    if (conn && conn.api) conn.api.close();
+  }
+}
+
+// --- ADDRESS LIST HELPERS (isolir/un-isolir untuk PPPoE & static) ---
+// Catatan: pakai .get() tanpa .where() karena library node-routeros 1.6.8
+// tidak handle reply "!empty" (ketika query match zero entry) — crash.
+// Filter manual di client-side lebih aman.
+async function addIsolirAddressList(ip, name = '', routerId = null) {
+  let conn = null;
+  try {
+    conn = await getConnection(routerId);
+    const addrListMenu = conn.client.menu('/ip/firewall/address-list');
+    const all = await addrListMenu.get();
+    const exists = all.find(e => e.address === ip && e.list === 'ISOLIR-1-SEGMEN');
+    if (!exists) {
+      await addrListMenu.add({ list: 'ISOLIR-1-SEGMEN', address: ip, comment: name });
+      logger.info(`[Mikrotik] Add ISOLIR-1-SEGMEN address-list: ${ip} (${name})`);
+    }
+    return true;
+  } catch (e) {
+    logger.error('Error addIsolirAddressList:', e);
+    throw e;
+  } finally {
+    if (conn && conn.api) conn.api.close();
+  }
+}
+
+async function removeIsolirAddressList(ip, routerId = null) {
+  let conn = null;
+  try {
+    conn = await getConnection(routerId);
+    const addrListMenu = conn.client.menu('/ip/firewall/address-list');
+    const all = await addrListMenu.get();
+    const matches = all.filter(e => e.address === ip && e.list === 'ISOLIR-1-SEGMEN');
+    for (const e of matches) {
+      const eid = e['.id'] || e.id;
+      if (!eid) continue;
+      try {
+        await addrListMenu.remove(eid);
+        logger.info(`[Mikrotik] Remove ISOLIR-1-SEGMEN address-list: ${ip}`);
+      } catch (innerErr) {
+        // "no such item" = entry sudah dihapus (idempotent), aman di-skip
+        if (/no such item/i.test(innerErr.message)) {
+          logger.warn(`[Mikrotik] Address-list entry ${ip} sudah tidak ada, skip.`);
+        } else {
+          throw innerErr;
+        }
+      }
+    }
+    return true;
+  } catch (e) {
+    logger.error('Error removeIsolirAddressList:', e);
     throw e;
   } finally {
     if (conn && conn.api) conn.api.close();
@@ -685,6 +773,8 @@ module.exports = {
   addPppoeProfile,
   updatePppoeProfile,
   deletePppoeProfile,
+  addIsolirAddressList,
+  removeIsolirAddressList,
   getHotspotUserProfiles,
   addHotspotUserProfile,
   updateHotspotUserProfile,

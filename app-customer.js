@@ -8,22 +8,38 @@ const customerSvc = require('./services/customerService');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { scheduleAutoBackup } = require('./services/backupService');
 
-// --- Fix node-routeros !empty crash ---
-// Monkey-patch Channel.onUnknown to prevent uncaughtException crash
-// when MikroTik returns unexpected response (e.g. "!empty")
+// --- Fix node-routeros crashes (unregistered tag, !empty, etc.) ---
+// Patch 1: Channel.onUnknown — MikroTik returns unexpected response (e.g. "!empty")
 try {
   const { Channel } = require('node-routeros/dist/Channel.js');
   const origOnUnknown = Channel.prototype.onUnknown;
   Channel.prototype.onUnknown = function(reply) {
-    logger.error(`[MikroTik] Channel received unknown reply: ${reply}`);
-    // Close channel gracefully instead of throwing
+    console.error(`[MikroTik] Channel received unknown reply: ${reply}`);
     this.close();
-    // Emit a proper error so the calling code can handle it
     this.emit('error', new Error(`MikroTik unknown reply: ${reply}`));
   };
 } catch (e) {
-  // If patch fails, uncaughtException handler below still acts as safety net
-  logger.warn('Could not patch node-routeros Channel.onUnknown:', e.message);
+  console.error('Could not patch node-routeros Channel.onUnknown:', e.message);
+}
+
+// Patch 2: Receiver.sendTagData — response for already-cleaned-up tag (unregistered tag)
+// This happens when MikroTik sends data after connection timeout/close.
+// Instead of throwing RosException (uncaught, kills process), just log and clean up.
+try {
+  const { Receiver } = require('node-routeros/dist/connector/Receiver.js');
+  const origSendTagData = Receiver.prototype.sendTagData;
+  Receiver.prototype.sendTagData = function(currentTag) {
+    const tag = this.tags.get(currentTag);
+    if (tag) {
+      tag.callback(this.currentPacket);
+    } else {
+      console.error(`[MikroTik] Received data on unregistered tag (ignored): ${currentTag}`);
+    }
+    this.cleanUp();
+  };
+  console.error('[MikroTik] Patched Receiver.sendTagData to ignore unregistered tags');
+} catch (e) {
+  console.error('Could not patch node-routeros Receiver.sendTagData:', e.message);
 }
 
 // Prefer IPv4 to avoid AggregateError (IPv6 timeouts) on some servers
@@ -37,10 +53,17 @@ process.on('unhandledRejection', (reason, promise) => {
   logger.error(`Unhandled Rejection: ${errorMsg}`);
 });
 
-// Handle uncaught exceptions (node-routeros !empty bug, etc.) to prevent 502 crashes
+// Handle uncaught exceptions — use console.error NOT logger (Winston file transport
+// may already be closed, causing "write after end" secondary crash that kills process)
 process.on('uncaughtException', (err) => {
-  logger.error(`uncaughtException: ${err.message}\n${err.stack}`);
-  // Don't exit — the server can keep serving other requests
+  console.error(`[FATAL] uncaughtException: ${err.message}\n${err.stack}`);
+  // Log to file safely via append
+  const fs = require('fs');
+  try {
+    fs.appendFileSync('/root/ali-jaya-billing/uncaught.log',
+      `${new Date().toISOString()} ${err.message}\n${err.stack}\n\n`);
+  } catch (_) {}
+  // Do NOT exit — keep serving other requests
 });
 
 // Settings Management
@@ -391,22 +414,22 @@ startServer(port);
 
 // WhatsApp bot (Baileys) — dihapus, sekarang pakai Evolution API via evolutionService.js
 
-// Telegram bot - webhook mode (more reliable than polling)
+// Telegram bot - polling mode (Cloudflare HTTPS→origin 530 issue, polling bypasses CF)
 if (getSetting('telegram_enabled', false)) {
-  const { initTelegram, getBot } = require('./services/telegramBot');
+  const { initTelegram } = require('./services/telegramBot');
   initTelegram();
 
-  // Webhook endpoint for Telegram
-  const tgToken = getSetting('telegram_bot_token', '');
-  if (tgToken) {
-    app.post('/api/telegram-webhook/' + tgToken, (req, res) => {
-      const bot = getBot();
-      if (bot) {
-        bot.processUpdate(req.body);
-      }
-      res.sendStatus(200);
-    });
-  }
+  // Webhook endpoint DISABLED (now using polling)
+  // const tgToken = getSetting('telegram_bot_token', '');
+  // if (tgToken) {
+  //   app.post('/api/telegram-webhook/' + tgToken, (req, res) => {
+  //     const bot = getBot();
+  //     if (bot) {
+  //       bot.processUpdate(req.body);
+  //     }
+  //     res.sendStatus(200);
+  //   });
+  // }
 }
 
 // Mulai cron jobs (generate tagihan otomatis, dll)

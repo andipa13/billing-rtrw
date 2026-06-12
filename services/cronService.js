@@ -172,46 +172,55 @@ function startCronJobs() {
     const today = new Date().getDate();
     // Kita cek semua pelanggan setiap hari untuk isolir otomatis
     logger.info(`[CRON] Menjalankan pengecekan isolir otomatis harian (Tanggal ${today})`);
-    
+
     const customers = customerSvc.getAllCustomers();
     let isolatedCount = 0;
+    let skippedCount = 0;
 
     for (const c of customers) {
-      // Cek apakah isolir otomatis aktif untuk user ini dan hari ini adalah tanggal isolirnya
-      const customerIsolirDay = c.isolate_day || 1;
-      const isAutoIsolateEnabled = c.auto_isolate !== 0; // default aktif jika null/1
+      // Safety net: kalau 1 customer error, jangan hentikan loop
+      try {
+        // Cek apakah isolir otomatis aktif untuk user ini dan hari ini adalah tanggal isolirnya
+        const customerIsolirDay = c.isolate_day || 1;
+        const isAutoIsolateEnabled = c.auto_isolate !== 0; // default aktif jika null/1
 
-      if (isAutoIsolateEnabled && today === customerIsolirDay) {
-        // Jika pelanggan aktif tapi punya tagihan belum bayar
-        if (c.status === 'active' && c.unpaid_count > 0) {
-          let attempt = 0;
-          const maxAttempts = 3;
-          let lastErr = null;
-          while (++attempt <= maxAttempts) {
-            try {
-              logger.info(`[CRON] Isolir otomatis pelanggan: ${c.name} (${c.pppoe_username}) - Tanggal Tagihan: ${customerIsolirDay}`);
-              // Gunakan fungsi terpusat untuk isolir
-              await customerSvc.suspendCustomer(c.id);
-              isolatedCount++;
-              lastErr = null;
-              break; // success
-            } catch (err) {
-              lastErr = err;
-              logger.error(`[CRON] Gagal isolir ${c.name} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
-              if (attempt < maxAttempts) {
-                const delay = attempt * 5 * 1000; // 5s, 10s, 15s
-                logger.info(`[CRON] Retry in ${delay/1000}s...`);
-                await new Promise(r => setTimeout(r, delay));
+        if (isAutoIsolateEnabled && today === customerIsolirDay) {
+          // Jika pelanggan aktif tapi punya tagihan belum bayar
+          if (c.status === 'active' && c.unpaid_count > 0) {
+            let attempt = 0;
+            const maxAttempts = 3;
+            let lastErr = null;
+            while (++attempt <= maxAttempts) {
+              try {
+                logger.info(`[CRON] Isolir otomatis pelanggan: ${c.name} (${c.pppoe_username}) - Tanggal Tagihan: ${customerIsolirDay}`);
+                // Gunakan fungsi terpusat untuk isolir
+                await customerSvc.suspendCustomer(c.id);
+                isolatedCount++;
+                lastErr = null;
+                break; // success
+              } catch (err) {
+                lastErr = err;
+                logger.error(`[CRON] Gagal isolir ${c.name} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
+                if (attempt < maxAttempts) {
+                  const delay = attempt * 5 * 1000; // 5s, 10s, 15s
+                  logger.info(`[CRON] Retry in ${delay/1000}s...`);
+                  await new Promise(r => setTimeout(r, delay));
+                }
               }
             }
-          }
-          if (lastErr) {
-            logger.error(`[CRON] Gagal isolir ${c.name} setelah ${maxAttempts} attempts: ${lastErr.message}`);
+            if (lastErr) {
+              logger.error(`[CRON] Gagal isolir ${c.name} setelah ${maxAttempts} attempts: ${lastErr.message}`);
+              skippedCount++;
+            }
           }
         }
+      } catch (outerErr) {
+        // Tangkap error per-customer supaya loop tidak berhenti
+        logger.error(`[CRON] Error saat proses customer ${c.name} (id=${c.id}): ${outerErr.message}`);
+        skippedCount++;
       }
     }
-    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir.`);
+    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir, ${skippedCount} dilewati.`);
   });
 
   cron.schedule('0 10 * * *', async () => {
@@ -297,6 +306,7 @@ function startCronJobs() {
       const maxAttempts = 3;
 
       while (attemptCount < maxAttempts) {
+        let formattedMsg = '';
         try {
           // Smart Random Delay
           const randomDelay = getRandomDelay(baseDelayMs, 2000);
@@ -308,7 +318,7 @@ function startCronJobs() {
 
           // Format pesan dengan variation untuk anti-spam
           const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 1) || 1) || 1;
-          let formattedMsg = template
+          formattedMsg = template
             .replace(/{{nama}}/gi, c.name || 'Pelanggan')
             .replace(/{{tagihan}}/gi, totalTagihan.toLocaleString('id-ID'))
             .replace(/{{rincian}}/gi, rincianBulan || '-')

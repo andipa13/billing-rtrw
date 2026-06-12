@@ -2,6 +2,7 @@
  * Service: CRUD Pelanggan & Paket
  */
 const db = require('../config/database');
+const { logger } = require('../config/logger');
 
 // ─── CUSTOMERS ───────────────────────────────────────────────
 function getAllCustomers(search = '', sort = 'name', dir = 'asc') {
@@ -333,6 +334,17 @@ async function suspendCustomer(id) {
     const isolirProfile = customer.isolir_profile || 'ISOLIR-1-SEGMEN';
     await mikrotikSvc.setPppoeProfile(customer.pppoe_username, isolirProfile, customer.router_id);
   }
+
+  // Tambahkan IP ke address-list ISOLIR-1-SEGMEN agar firewall forward drop traffic.
+  // Berlaku untuk semua tipe (PPPoE, static, hotspot) selama customer punya IP.
+  const isolirIp = customer.static_ip || customer.ip_address;
+  if (isolirIp) {
+    try {
+      await mikrotikSvc.addIsolirAddressList(isolirIp, customer.name, customer.router_id);
+    } catch (e) {
+      logger.warn(`[Customer] Gagal add address-list untuk ${customer.name} (${isolirIp}): ${e.message}`);
+    }
+  }
   return true;
 }
 
@@ -355,7 +367,34 @@ async function activateCustomer(id) {
   } else if (customer.pppoe_username) {
     const pkg = getPackageById(customer.package_id);
     const targetProfile = pkg ? pkg.name : 'default';
-    await mikrotikSvc.setPppoeProfile(customer.pppoe_username, targetProfile, customer.router_id);
+    try {
+      await mikrotikSvc.setPppoeProfile(customer.pppoe_username, targetProfile, customer.router_id);
+    } catch (e) {
+      if (/not found in MikroTik|secret missing/i.test(e.message)) {
+        // Secret missing on MikroTik — re-add it with the target profile and a default password.
+        // Admin can reset the password later if needed.
+        logger.warn(`[Customer] PPPoE secret missing for ${customer.pppoe_username} — re-adding with profile ${targetProfile}`);
+        await mikrotikSvc.addPppoeSecret({
+          name: customer.pppoe_username,
+          password: customer.pppoe_password || customer.login_pin || 'changeme',
+          service: 'pppoe',
+          profile: targetProfile
+        }, customer.router_id);
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  // Hapus IP dari address-list ISOLIR-1-SEGMEN saat pelunasan agar firewall tidak drop traffic.
+  // Berlaku untuk semua tipe (PPPoE, static, hotspot) selama customer punya IP.
+  const isolirIp = customer.static_ip || customer.ip_address;
+  if (isolirIp) {
+    try {
+      await mikrotikSvc.removeIsolirAddressList(isolirIp, customer.router_id);
+    } catch (e) {
+      logger.warn(`[Customer] Gagal remove address-list untuk ${customer.name} (${isolirIp}): ${e.message}`);
+    }
   }
   return true;
 }

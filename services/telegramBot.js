@@ -16,7 +16,7 @@ function initTelegram() {
 
   if (!enabled || !token) {
     if (bot) {
-      bot.deleteWebHook().catch(() => {});
+      try { bot.stopPolling(); } catch (e) {}
       bot = null;
       logger.info('Telegram Bot: Dihentikan (Nonaktif)');
     }
@@ -25,7 +25,7 @@ function initTelegram() {
 
   // Jika token berubah, kita harus stop bot lama dan buat baru
   if (bot && bot.token !== token) {
-    bot.deleteWebHook().catch(() => {});
+    try { bot.stopPolling(); } catch (e) {}
     bot = null;
     logger.info('Telegram Bot: Token berubah, me-restart bot...');
   }
@@ -35,15 +35,11 @@ function initTelegram() {
     return; 
   }
 
-  bot = new TelegramBot(token, { polling: false });
-  
-  // Webhook mode
-  const webhookUrl = "https://billingzyandra.zyanet.cloud/api/telegram-webhook/" + token;
-  bot.setWebHook(webhookUrl).then(() => {
-    bot.getMe().then(me => {
-      logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (webhook)`);
-    }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
-  }).catch(e => logger.error('Telegram Bot Error (setWebHook):', e.message));
+  // Polling mode (lebih reliable tanpa butuh HTTPS publik ke CF)
+  bot = new TelegramBot(token, { polling: true });
+  bot.getMe().then(me => {
+    logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (polling)`);
+  }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
 
   // Middleware Admin Check (Fetch latest ID every time)
   const isAdmin = (msg) => {
