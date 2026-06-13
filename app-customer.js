@@ -414,22 +414,26 @@ startServer(port);
 
 // WhatsApp bot (Baileys) — dihapus, sekarang pakai Evolution API via evolutionService.js
 
-// Telegram bot - polling mode (Cloudflare HTTPS→origin 530 issue, polling bypasses CF)
+// Telegram bot — webhook (preferred) atau polling (fallback)
 if (getSetting('telegram_enabled', false)) {
-  const { initTelegram } = require('./services/telegramBot');
+  const { initTelegram, getBot } = require('./services/telegramBot');
   initTelegram();
 
-  // Webhook endpoint DISABLED (now using polling)
-  // const tgToken = getSetting('telegram_bot_token', '');
-  // if (tgToken) {
-  //   app.post('/api/telegram-webhook/' + tgToken, (req, res) => {
-  //     const bot = getBot();
-  //     if (bot) {
-  //       bot.processUpdate(req.body);
-  //     }
-  //     res.sendStatus(200);
-  //   });
-  // }
+  // Webhook endpoint: Telegram POST ke sini via Cloudflare Tunnel
+  const tgToken = getSetting('telegram_bot_token', '');
+  if (tgToken) {
+    app.post('/api/telegram-webhook/' + tgToken, (req, res) => {
+      const bot = getBot();
+      if (bot) {
+        try {
+          bot.processUpdate(req.body);
+        } catch (e) {
+          logger.error('Telegram webhook processUpdate error:', e.message);
+        }
+      }
+      res.sendStatus(200);
+    });
+  }
 }
 
 // Mulai cron jobs (generate tagihan otomatis, dll)

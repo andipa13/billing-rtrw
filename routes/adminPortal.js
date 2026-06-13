@@ -3942,6 +3942,13 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), async
     // Lunas
     db.prepare("UPDATE invoices SET status = 'paid', paid_at = datetime('now', '+8 hours'), partial_paid = ?, paid_by_name = 'Kasir Lapangan', notes = COALESCE(notes, '') || ? WHERE id = ?")
       .run(inv.amount, noteText, invoice_id);
+    // Rolling isolir: bayar setelah tanggal isolir → geser isolate_day ke tanggal bayar
+    try {
+      const billingSvc = require('../services/billingService');
+      if (typeof billingSvc.autoShiftIsolateDay === 'function') {
+        billingSvc.autoShiftIsolateDay(inv.customer_id);
+      }
+    } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
     // Re-enable auto_isolate jika semua invoice lunas
     const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);
     if (remaining && remaining.cnt === 0) {
@@ -3983,6 +3990,14 @@ router.post('/penagihan/lunas', requireAdminSession, express.json(), async (req,
 
   db.prepare("UPDATE invoices SET status = 'paid', paid_at = datetime('now', '+8 hours'), partial_paid = amount, paid_by_name = 'Kasir Lapangan', notes = COALESCE(notes, '') || ? WHERE id = ?")
     .run(noteText, invoice_id);
+
+  // Rolling isolir: bayar setelah tanggal isolir → geser isolate_day ke tanggal bayar
+  try {
+    const billingSvc = require('../services/billingService');
+    if (typeof billingSvc.autoShiftIsolateDay === 'function') {
+      billingSvc.autoShiftIsolateDay(inv.customer_id);
+    }
+  } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
 
   // Cek apakah semua invoice customer sudah lunas -> activate & re-enable auto_isolate
   const remaining = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = 'unpaid' AND id != ?").get(inv.customer_id, invoice_id);

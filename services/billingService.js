@@ -166,6 +166,13 @@ function generateInvoiceForCustomer(customerId, month, year) {
  * Ini mencegah bug: generate+lunasi tagihan bulan depan di akhir bulan TIDAK lagi
  * menggeser tanggal isolir (karena pelanggan masih aktif / bayar di muka).
  */
+/**
+ * Aturan rolling isolir:
+ *   - Bayar LEWAT dari isolate_day bulan ini (today > currentDue) → geser isolate_day ke today.
+ *   - Bayar TEPAT atau SEBELUM isolate_day (today <= currentDue) → isolate_day tetap.
+ * Berlaku tanpa syarat status (active / suspended). Berlaku untuk semua payment path
+ * yang memanggil helper ini.
+ */
 function autoShiftIsolateDay(customerId) {
   const row = db.prepare('SELECT isolate_day, status FROM customers WHERE id=?').get(customerId);
   if (!row) return;
@@ -173,11 +180,11 @@ function autoShiftIsolateDay(customerId) {
   const currentDue = Number(row.isolate_day) || 10;
   const today = now.getDate();
 
-  // Hanya geser jika pelanggan benar-benar TELAT (sedang terisolir saat bayar).
-  if (row.status === 'suspended' && today !== currentDue) {
+  // Geser hanya jika bayar lewat dari tanggal isolir bulan ini.
+  if (today > currentDue) {
     db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(today, customerId);
   }
-  // Pelanggan aktif (bayar normal / di muka) → tanggal isolir tetap.
+  // today <= currentDue (tepat waktu / bayar di muka) → isolir_day tetap.
 }
 
 function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes) {
@@ -660,5 +667,6 @@ module.exports = {
   getDashboardStats, getRecentPayments, getTopUnpaid, getAllPaidInvoices,
   getTodayRevenue,
   updatePaymentInfo,
-  revertPayment
+  revertPayment,
+  autoShiftIsolateDay
 };

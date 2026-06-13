@@ -13,6 +13,7 @@ const addWizard = {}; // chatId -> wizard state
 function initTelegram() {
   const enabled = getSetting('telegram_enabled', false);
   const token = getSetting('telegram_bot_token', '');
+  const webhookUrl = (getSetting('telegram_webhook_url', '') || '').replace(/\/+$/, '');
 
   if (!enabled || !token) {
     if (bot) {
@@ -32,14 +33,27 @@ function initTelegram() {
 
   if (bot) {
     logger.info('Telegram Bot: Sudah berjalan, melewati inisialisasi.');
-    return; 
+    return;
   }
 
-  // Polling mode (lebih reliable tanpa butuh HTTPS publik ke CF)
-  bot = new TelegramBot(token, { polling: true });
-  bot.getMe().then(me => {
-    logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (polling)`);
-  }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
+  // Webhook mode (preferred — kebal EHOSTUNREACH/Starlink flap)
+  if (webhookUrl) {
+    bot = new TelegramBot(token, { webHook: false }); // no built-in webhook server; kita terima manual
+    bot.getMe().then(me => {
+      logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (webhook: ${webhookUrl})`);
+    }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
+    // Daftarkan URL webhook ke Telegram (best-effort, sekali saat init)
+    bot.setWebHook(`${webhookUrl}/api/telegram-webhook/${token}`).then(r => {
+      logger.info(`Telegram Bot: setWebHook result = ${JSON.stringify(r)}`);
+    }).catch(e => logger.error('Telegram Bot setWebHook error:', e.message));
+    // Lanjut mount handlers di bawah (jangan return di sini)
+  } else {
+    // Polling mode (fallback)
+    bot = new TelegramBot(token, { polling: true });
+    bot.getMe().then(me => {
+      logger.info(`Telegram Bot: Terhubung sebagai @${me.username} (polling)`);
+    }).catch(e => logger.error('Telegram Bot Error (getMe):', e.message));
+  }
 
   // Middleware Admin Check (Fetch latest ID every time)
   const isAdmin = (msg) => {
