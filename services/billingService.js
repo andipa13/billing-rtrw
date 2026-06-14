@@ -168,26 +168,56 @@ function generateInvoiceForCustomer(customerId, month, year) {
  */
 /**
  * Aturan rolling isolir:
- *   - Bayar LEWAT dari isolate_day bulan ini (today > currentDue) → geser isolate_day ke today.
  *   - Bayar TEPAT atau SEBELUM isolate_day (today <= currentDue) → isolate_day tetap.
+ *   - Bayar LEWAT (today > currentDue) → isolate_day geser ke tanggal anchor aktivasi.
+ *     Default anchor = tanggal bayar aktual (today). Bisa di-override via overrideDay
+ *     (misal pelanggan konfirmasi dulu tgl 12, baru bayar lunas tgl 14, anchor = 12).
  * Berlaku tanpa syarat status (active / suspended). Berlaku untuk semua payment path
  * yang memanggil helper ini.
  */
-function autoShiftIsolateDay(customerId) {
-  const row = db.prepare('SELECT isolate_day, status FROM customers WHERE id=?').get(customerId);
+function autoShiftIsolateDay(customerId, overrideDay = null) {
+  const row = db.prepare('SELECT isolate_day, status, last_unisolate_at FROM customers WHERE id=?').get(customerId);
   if (!row) return;
   const now = new Date();
   const currentDue = Number(row.isolate_day) || 10;
   const today = now.getDate();
 
-  // Geser hanya jika bayar lewat dari tanggal isolir bulan ini.
+  // Hanya geser jika bayar lewat dari tanggal isolir bulan ini.
   if (today > currentDue) {
-    db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(today, customerId);
+    // Prioritas anchor:
+    //   1) overrideDay (eksplisit, mis. dari form modal Lunas)
+    //   2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
+    // Tanpa anchor → isolate_day TETAP (meskipun bayar lewat).
+    // Aturan: hanya customer yang SUDAH PERNAH SUSPEND & dibuka manual yg digeser.
+    let newDay = null;
+    if (overrideDay != null) {
+      const od = parseInt(overrideDay);
+      if (Number.isFinite(od) && od >= 1 && od <= 28) {
+        newDay = od;
+      }
+    }
+    if (newDay == null && row.last_unisolate_at) {
+      // last_unisolate_at format YYYY-MM-DD
+      const parts = String(row.last_unisolate_at).split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0]);
+        const m = parseInt(parts[1]);
+        const d = parseInt(parts[2]);
+        if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d) && d >= 1 && d <= 28) {
+          newDay = d;
+        }
+      }
+    }
+    // Hanya update jika ada anchor valid.
+    if (newDay != null) {
+      db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(newDay, customerId);
+    }
+    // Tanpa anchor → isolate_day tidak berubah (pelanggan belum suspend, belum dibuka manual).
   }
   // today <= currentDue (tepat waktu / bayar di muka) → isolir_day tetap.
 }
 
-function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes) {
+function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes, overrideDay = null) {
   const cid = Number(customerId);
   const m = Number(month);
   const y = Number(year);
@@ -205,11 +235,11 @@ function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes)
 
   const ensure = generateInvoiceForCustomer(cid, m, y);
   markAsPaid(ensure.invoiceId, paidByName, notes);
-  autoShiftIsolateDay(cid);
+  autoShiftIsolateDay(cid, overrideDay);
   return { created: ensure.created, paid: true, alreadyPaid: false, invoiceId: ensure.invoiceId, customerName: ensure.customerName };
 }
 
-function payInvoicesForCustomerMonths(customerId, year, months, paidByName, notes) {
+function payInvoicesForCustomerMonths(customerId, year, months, paidByName, notes, overrideDay = null) {
   const cid = Number(customerId);
   const y = Number(year);
   if (!Number.isFinite(cid) || cid <= 0) throw new Error('Customer ID tidak valid');
@@ -256,7 +286,7 @@ function payInvoicesForCustomerMonths(customerId, year, months, paidByName, note
     }
   });
   run();
-  autoShiftIsolateDay(cid);
+  autoShiftIsolateDay(cid, overrideDay);
   return summary;
 }
 
@@ -337,7 +367,7 @@ function getInvoiceById(id) {
   `).get(id);
 }
 
-function markAsPaid(invoiceId, paidByName, notes, actor = null) {
+function markAsPaid(invoiceId, paidByName, notes, actor = null, overrideDay = null) {
   const result = db.prepare(`
     UPDATE invoices SET status='paid', paid_at=CURRENT_TIMESTAMP, paid_by_name=?, notes=? WHERE id=?
   `).run(paidByName || 'Admin', notes || '', invoiceId);
@@ -345,7 +375,7 @@ function markAsPaid(invoiceId, paidByName, notes, actor = null) {
   // Auto-shift due date jika bayar telat
   if (result.changes > 0) {
     const invRow = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(invoiceId);
-    if (invRow) autoShiftIsolateDay(invRow.customer_id);
+    if (invRow) autoShiftIsolateDay(invRow.customer_id, overrideDay);
   }
 
   // Catat audit trail jika berhasil

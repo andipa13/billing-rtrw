@@ -149,7 +149,8 @@
                       <button class="btn btn-d btn-icon btn-sm"><i class="bi bi-x-lg"></i></button>
                     </form>
                   <% } %>
-                  <form method="POST" action="/admin/customers/<%= inv.customer_id %>/unisolate" style="display:inline" class="needs-confirm" data-confirm-key="confirmUnisolate">
+                  <form method="POST" action="/admin/customers/<%= inv.customer_id %>/unisolate" style="display:inline" class="needs-confirm needs-anchor" data-confirm-key="confirmUnisolate">
+                    <input type="hidden" name="activate_anchor_day" value="">
                     <button class="btn btn-p btn-icon btn-sm" title="<%= t('admin.billing.actions.unisolate', 'Buka Isolir') %>"><i class="bi bi-wifi"></i></button>
                   </form>
                   <form method="POST" action="/admin/billing/<%= inv.id %>/whatsapp" style="display:inline">
@@ -231,6 +232,11 @@
 
         <div class="fg"><label class="fl"><%= t('admin.billing.received_by', 'Diterima Oleh') %></label><input class="fc" name="paid_by_name" placeholder="<%= t('admin.billing.received_by_placeholder', 'Nama petugas / teknisi') %>" value="Admin"></div>
         <div class="fg"><label class="fl"><%= t('admin.billing.notes_optional', 'Catatan (opsional)') %></label><textarea class="fc" name="notes" placeholder="<%= t('admin.billing.notes_placeholder', 'Transfer BRI, tunai, dll...') %>"></textarea></div>
+        <div class="fg">
+          <label class="fl"><%= t('admin.billing.anchor_label', 'Tgl Aktivasi Manual (opsional)') %></label>
+          <input class="fc" type="number" name="activate_anchor_day" min="1" max="28" placeholder="<%= t('admin.billing.anchor_placeholder', 'Kosongkan jika tidak buka isolir manual') %>">
+          <small style="font-size:11px;color:var(--muted)"><%= t('admin.billing.anchor_hint', 'Isi hanya jika admin sudah buka isolir manual di tanggal lain. Kosongkan = pakai tanggal bayar (rolling normal).') %></small>
+        </div>
       </div>
       <div class="mf">
         <button type="button" class="btn btn-g" onclick="closeModal('payModal')"><%= t('common.cancel', 'Batal') %></button>
@@ -265,7 +271,19 @@ document.addEventListener('submit', function(e) {
   if (!form.classList.contains('needs-confirm')) return;
   const key = String(form.dataset.confirmKey || '');
   const msg = I18N[key] || 'Lanjutkan?';
-  if (!confirm(msg)) e.preventDefault();
+  if (!confirm(msg)) { e.preventDefault(); return; }
+  // Form unisolate: tanya anchor hari aktivasi manual
+  if (form.classList.contains('needs-anchor')) {
+    const anchorInput = form.querySelector('input[name="activate_anchor_day"]');
+    if (anchorInput) {
+      const today = new Date().getDate();
+      const ans = prompt('Tanggal aktivasi manual (tanggal buka isolir)?\n\nKosongkan / 0 = pakai tanggal hari ini (' + today + ').', '');
+      if (ans !== null) {
+        const trimmed = String(ans).trim();
+        anchorInput.value = (trimmed === '' || trimmed === '0') ? '' : trimmed;
+      }
+    }
+  }
 });
 
 // Handle "Tandai Lunas" via data-* attributes (avoid EJS/HTML quote conflict)

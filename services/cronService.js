@@ -180,11 +180,10 @@ function startCronJobs() {
     for (const c of customers) {
       // Safety net: kalau 1 customer error, jangan hentikan loop
       try {
-        // Cek apakah isolir otomatis aktif untuk user ini dan hari ini adalah tanggal isolirnya
+        // Cek apakah hari ini adalah tanggal isolirnya
         const customerIsolirDay = c.isolate_day || 1;
-        const isAutoIsolateEnabled = c.auto_isolate !== 0; // default aktif jika null/1
 
-        if (isAutoIsolateEnabled && today === customerIsolirDay) {
+        if (today === customerIsolirDay) {
           // Jika pelanggan aktif tapi punya tagihan belum bayar
           if (c.status === 'active' && c.unpaid_count > 0) {
             let attempt = 0;

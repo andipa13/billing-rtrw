@@ -1415,15 +1415,30 @@ router.post('/customers/:id/unisolate', requireAdminSession, async (req, res) =>
   try {
     await customerSvc.activateCustomer(req.params.id);
     const customer = customerSvc.getCustomerById(req.params.id);
+    // Catat tgl buka isolir ke last_unisolate_at (untuk rolling autoShiftIsolateDay)
+    const anchorRaw = (req.body && req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '')
+      ? parseInt(req.body.activate_anchor_day)
+      : null;
+    const todayDay = new Date().getDate();
+    const anchorDay = (anchorRaw != null && Number.isFinite(anchorRaw) && anchorRaw >= 1 && anchorRaw <= 28) ? anchorRaw : todayDay;
+    const now = new Date();
+    const unisolateDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(anchorDay).padStart(2,'0')}`;
+    db.prepare('UPDATE customers SET last_unisolate_at = ? WHERE id = ?').run(unisolateDate, req.params.id);
     // Cek apakah masih ada tagihan unpaid -> disable auto isolir agar masuk penagihan manual
-    const db = require('../config/database');
     const unpaid = db.prepare('SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = ? AND status = ?').get(req.params.id, 'unpaid');
     if (unpaid && unpaid.cnt > 0) {
       db.prepare('UPDATE customers SET auto_isolate = 0 WHERE id = ?').run(req.params.id);
-      req.session._msg = { type: 'success', text: `Layanan "${customer.name}" aktif kembali. Auto-isolir DIMATIKAN (masuk daftar penagihan).` };
+      req.session._msg = { type: 'success', text: `Layanan "${customer.name}" aktif kembali (anchor tgl ${anchorDay}). Auto-isolir DIMATIKAN (masuk daftar penagihan).` };
     } else {
-      req.session._msg = { type: 'success', text: `Layanan pelanggan "${customer.name}" berhasil diaktifkan kembali.` };
+      req.session._msg = { type: 'success', text: `Layanan pelanggan "${customer.name}" berhasil diaktifkan kembali (anchor tgl ${anchorDay}).` };
     }
+    // Rolling isolir: buka isolir manual (yg telat bayar) -> geser isolate_day ke tanggal buka
+    // konsisten dgn flow pembayaran agar siklus isolir bulan depan sesuai tanggal aktual
+    try {
+      if (typeof billingSvc.autoShiftIsolateDay === 'function') {
+        billingSvc.autoShiftIsolateDay(req.params.id, anchorDay);
+      }
+    } catch (e) { logger.warn('autoShiftIsolateDay skip (unisolate): ' + e.message); }
   } catch (e) {
     req.session._msg = { type: 'error', text: 'Gagal aktivasi: ' + e.message };
   }
@@ -1475,11 +1490,12 @@ router.post('/customers/:id/billing/install-prorata', requireAdminSession, restr
 
 router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const { month, months, year, paid_by_name, notes } = req.body;
+    const { month, months, year, paid_by_name, notes, activate_anchor_day } = req.body;
     const y = parseInt(year);
+    const anchor = (activate_anchor_day != null && activate_anchor_day !== '') ? parseInt(activate_anchor_day) : null;
 
     if (months != null) {
-      const sum = billingSvc.payInvoicesForCustomerMonths(req.params.id, y, months, paid_by_name, notes);
+      const sum = billingSvc.payInvoicesForCustomerMonths(req.params.id, y, months, paid_by_name, notes, anchor);
       const done = sum.paidMonths.length;
       const already = sum.alreadyPaidMonths.length;
       const created = sum.createdMonths.length;
@@ -1487,7 +1503,7 @@ router.post('/customers/:id/billing/pay', requireAdminSession, express.urlencode
       req.session._msg = { type: 'success', text: `Pembayaran berhasil untuk "${sum.customerName}" tahun ${sum.year}. Total: Rp ${total.toLocaleString('id-ID')} (${sum.totalMonths || 0} bulan). Dibayar: ${done} bulan, dibuat: ${created}, sudah lunas: ${already}.` };
     } else {
       const m = parseInt(month);
-      const result = billingSvc.payInvoiceForCustomerPeriod(req.params.id, m, y, paid_by_name, notes);
+      const result = billingSvc.payInvoiceForCustomerPeriod(req.params.id, m, y, paid_by_name, notes, anchor);
       if (result.alreadyPaid) {
         req.session._msg = { type: 'success', text: `Tagihan periode ${m}/${y} untuk "${result.customerName}" sudah lunas.` };
       } else {
@@ -1645,7 +1661,8 @@ router.get('/api/customers/:id/billing-year', requireAdmin, (req, res) => {
 
 router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const { invoice_ids, paid_by_name, notes } = req.body;
+    const { invoice_ids, paid_by_name, notes, activate_anchor_day } = req.body;
+    const anchor = (activate_anchor_day != null && activate_anchor_day !== '') ? parseInt(activate_anchor_day) : null;
     const ids = Array.isArray(invoice_ids) ? invoice_ids : [invoice_ids];
     
     if (!ids || ids.length === 0) throw new Error('Tidak ada tagihan yang dipilih');
@@ -1655,7 +1672,7 @@ router.post('/billing/pay-bulk', requireAdminSession, express.urlencoded({ exten
       const inv = billingSvc.getInvoiceById(id);
       if (inv) {
         customerId = inv.customer_id;
-        billingSvc.markAsPaid(id, paid_by_name, notes);
+        billingSvc.markAsPaid(id, paid_by_name, notes, null, anchor);
       }
     }
 
@@ -1691,7 +1708,8 @@ router.post('/billing/:id/pay', requireAdminSession, express.urlencoded({ extend
     const inv = billingSvc.getInvoiceById(req.params.id);
     if (!inv) throw new Error('Tagihan tidak ditemukan');
 
-    billingSvc.markAsPaid(req.params.id, req.body.paid_by_name, req.body.notes);
+    const anchor = (req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '') ? parseInt(req.body.activate_anchor_day) : null;
+    billingSvc.markAsPaid(req.params.id, req.body.paid_by_name, req.body.notes, null, anchor);
     
     // Check if customer is currently suspended and has no more unpaid invoices
     const customer = customerSvc.getCustomerById(inv.customer_id);
@@ -3946,7 +3964,10 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), async
     try {
       const billingSvc = require('../services/billingService');
       if (typeof billingSvc.autoShiftIsolateDay === 'function') {
-        billingSvc.autoShiftIsolateDay(inv.customer_id);
+        const anchor = (req.body && req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '')
+          ? parseInt(req.body.activate_anchor_day)
+          : null;
+        billingSvc.autoShiftIsolateDay(inv.customer_id, anchor);
       }
     } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
     // Re-enable auto_isolate jika semua invoice lunas
@@ -3995,7 +4016,10 @@ router.post('/penagihan/lunas', requireAdminSession, express.json(), async (req,
   try {
     const billingSvc = require('../services/billingService');
     if (typeof billingSvc.autoShiftIsolateDay === 'function') {
-      billingSvc.autoShiftIsolateDay(inv.customer_id);
+      const anchor = (req.body && req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '')
+        ? parseInt(req.body.activate_anchor_day)
+        : null;
+      billingSvc.autoShiftIsolateDay(inv.customer_id, anchor);
     }
   } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
 

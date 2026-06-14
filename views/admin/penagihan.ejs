@@ -82,9 +82,14 @@
     <label style="font-size:0.85em;font-weight:600">Jumlah Bayar (Rp)</label>
     <input type="number" id="pm-amt" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" min="1000" step="1000" placeholder="50000">
   </div>
-  <div style="margin-bottom:16px">
+  <div style="margin-bottom:12px">
     <label style="font-size:0.85em;font-weight:600">Catatan (opsional)</label>
     <input type="text" id="pm-note" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="bayar setengah">
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="font-size:0.85em;font-weight:600">Tgl Aktivasi Manual (opsional)</label>
+    <input type="number" id="pm-anchor" min="1" max="28" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="Kosongkan = rolling normal">
+    <small style="font-size:11px;color:var(--muted)">Hanya diisi jika admin sudah buka isolir manual di tanggal lain.</small>
   </div>
   <div style="display:flex;gap:10px;justify-content:flex-end">
     <button class="btn btn-g btn-sm" onclick="closePay()">Batal</button>
@@ -99,6 +104,7 @@ function showPay(id, name, invIds, sisa) {
   document.getElementById('pm-inv').value = invIds.split(',')[0];
   document.getElementById('pm-amt').value = '';
   document.getElementById('pm-note').value = '';
+  document.getElementById('pm-anchor').value = '';
   document.getElementById('payModal').style.display = 'flex';
 }
 function closePay() { document.getElementById('payModal').style.display = 'none'; }
@@ -106,12 +112,14 @@ async function submitPay() {
   const invoiceId = Number(document.getElementById('pm-inv').value);
   const amount = Number(document.getElementById('pm-amt').value);
   const notes = document.getElementById('pm-note').value;
+  const anchorRaw = String(document.getElementById('pm-anchor').value || '').trim();
+  const anchor = (anchorRaw === '' || anchorRaw === '0') ? null : parseInt(anchorRaw);
   if (!amount || amount < 1000) { alert('Min Rp 1.000'); return; }
   try {
     const r = await fetch('/admin/penagihan/partial-pay', {
       method: 'POST',
       headers: {'Content-Type':'application/json','Accept':'application/json'},
-      body: JSON.stringify({ invoice_id: invoiceId, amount, notes })
+      body: JSON.stringify({ invoice_id: invoiceId, amount, notes, activate_anchor_day: anchor })
     });
     const d = await r.json();
     if (d.ok) { alert(d.message); location.reload(); }
@@ -124,23 +132,26 @@ function showLunas(id, name, invIds, sisa) {
   document.getElementById('lm-inv').value = invIds;
   document.getElementById('lm-amount').value = sisa;
   document.getElementById('lm-note').value = '';
+  document.getElementById('lm-anchor').value = '';
   document.getElementById('lunasModal').style.display = 'flex';
 }
 function closeLunas() { document.getElementById('lunasModal').style.display = 'none'; }
 async function submitLunas() {
   const invIds = document.getElementById('lm-inv').value.split(',');
   const notes = document.getElementById('lm-note').value || 'Lunas penagihan';
+  const anchorRaw = String(document.getElementById('lm-anchor').value || '').trim();
+  const anchor = (anchorRaw === '' || anchorRaw === '0') ? null : parseInt(anchorRaw);
   try {
     for (const invId of invIds) {
       const r = await fetch('/admin/penagihan/lunas', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ invoice_id: Number(invId), notes })
+        body: JSON.stringify({ invoice_id: Number(invId), notes, activate_anchor_day: anchor })
       });
       const d = await r.json();
       if (!d.ok) { alert('Gagal inv #' + invId + ': ' + d.error); return; }
     }
-    alert('Semua tagihan berhasil dilunasi!');
+    alert('Semua tagihan berhasil dilunasi!' + (anchor ? '\nIsolate_day akan digeser ke tgl ' + anchor + ' bulan depan.' : ''));
     location.reload();
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -154,9 +165,14 @@ async function submitLunas() {
   <p>Total Sisa: <strong id="lm-sisa" style="color:#e94560"></strong></p>
   <input type="hidden" id="lm-inv">
   <input type="hidden" id="lm-amount">
-  <div style="margin-bottom:16px">
+  <div style="margin-bottom:12px">
     <label style="font-size:0.85em;font-weight:600">Catatan (opsional)</label>
     <input type="text" id="lm-note" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="Lunas tunai">
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="font-size:0.85em;font-weight:600">Tgl Aktivasi Manual (opsional)</label>
+    <input type="number" id="lm-anchor" min="1" max="28" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" placeholder="Kosongkan jika tidak buka isolir manual">
+    <small style="font-size:11px;color:var(--muted)">Isi hanya jika admin sudah buka isolir manual di tanggal lain. Kosongkan = rolling normal (geser ke tgl bayar).</small>
   </div>
   <div style="background:#d4edda;border-radius:8px;padding:12px;margin-bottom:16px;font-size:0.85em">
     <i class="bi bi-info-circle"></i> Semua tagihan ditandai <b>LUNAS</b>. Auto-isolir aktif kembali.
