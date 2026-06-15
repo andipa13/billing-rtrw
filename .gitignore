@@ -42,4 +42,9 @@ settings.json
 /database.db-wal
 send_*.py
 *.backup-*
+*.bak-*
+*.bak2-*
+
+# Graphify tool output (generated)
+graphify-out/
 
