@@ -156,24 +156,14 @@ function generateInvoiceForCustomer(customerId, month, year) {
 }
 
 /**
- * Otomatis geser isolate_day berdasarkan kondisi pembayaran.
- * Rule (diperbaiki):
- *   - Pelanggan TELAT bayar (sampai terisolir / status 'suspended') → isolate_day bulan depan = tanggal bayar
- *   - Pelanggan bayar normal / di muka (status 'active') → isolate_day TETAP (tidak digeser)
- *
- * Catatan: fungsi ini dipanggil SEBELUM activateCustomer di route pembayaran,
- * jadi status 'suspended' di sini = pelanggan yang memang sedang terisolir saat membayar.
- * Ini mencegah bug: generate+lunasi tagihan bulan depan di akhir bulan TIDAK lagi
- * menggeser tanggal isolir (karena pelanggan masih aktif / bayar di muka).
- */
-/**
- * Aturan rolling isolir:
+ * Aturan rolling isolir (autoShiftIsolateDay):
  *   - Bayar TEPAT atau SEBELUM isolate_day (today <= currentDue) → isolate_day tetap.
- *   - Bayar LEWAT (today > currentDue) → isolate_day geser ke tanggal anchor aktivasi.
- *     Default anchor = tanggal bayar aktual (today). Bisa di-override via overrideDay
- *     (misal pelanggan konfirmasi dulu tgl 12, baru bayar lunas tgl 14, anchor = 12).
- * Berlaku tanpa syarat status (active / suspended). Berlaku untuk semua payment path
- * yang memanggil helper ini.
+ *   - Bayar LEWAT (today > currentDue) → isolate_day geser ke tanggal anchor:
+ *       1) overrideDay (dari form modal Lunas / aktivasi manual)
+ *       2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
+ *       3) Default: tanggal bayar hari ini (today). Jika bayar > jam 19:00 → +1 hari.
+ * Berlaku tanpa syarat status (active / suspended). Dipanggil dari semua path
+ * pembayaran: billing page, penagihan, agent, WA bot, webhook.
  */
 function autoShiftIsolateDay(customerId, overrideDay = null) {
   const row = db.prepare('SELECT isolate_day, status, last_unisolate_at FROM customers WHERE id=?').get(customerId);
@@ -187,8 +177,7 @@ function autoShiftIsolateDay(customerId, overrideDay = null) {
     // Prioritas anchor:
     //   1) overrideDay (eksplisit, mis. dari form modal Lunas)
     //   2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
-    // Tanpa anchor → isolate_day TETAP (meskipun bayar lewat).
-    // Aturan: hanya customer yang SUDAH PERNAH SUSPEND & dibuka manual yg digeser.
+    //   3) Default: tanggal bayar hari ini. Jika > jam 19:00 → +1 hari.
     let newDay = null;
     if (overrideDay != null) {
       const od = parseInt(overrideDay);
@@ -208,11 +197,15 @@ function autoShiftIsolateDay(customerId, overrideDay = null) {
         }
       }
     }
-    // Hanya update jika ada anchor valid.
+    // Fallback: tanggal bayar hari ini. Jika > jam 19:00 WITA → +1 hari.
+    if (newDay == null) {
+      const hour = now.getHours();
+      newDay = hour >= 19 ? today + 1 : today;
+    }
+    // Update isolate_day
     if (newDay != null) {
       db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(newDay, customerId);
     }
-    // Tanpa anchor → isolate_day tidak berubah (pelanggan belum suspend, belum dibuka manual).
   }
   // today <= currentDue (tepat waktu / bayar di muka) → isolir_day tetap.
 }
@@ -369,7 +362,7 @@ function getInvoiceById(id) {
 
 function markAsPaid(invoiceId, paidByName, notes, actor = null, overrideDay = null) {
   const result = db.prepare(`
-    UPDATE invoices SET status='paid', paid_at=CURRENT_TIMESTAMP, paid_by_name=?, notes=? WHERE id=?
+    UPDATE invoices SET status='paid', paid_at=datetime('now', '+8 hours'), paid_by_name=?, notes=? WHERE id=?
   `).run(paidByName || 'Admin', notes || '', invoiceId);
 
   // Auto-shift due date jika bayar telat

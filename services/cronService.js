@@ -167,12 +167,12 @@ function startCronJobs() {
     }
   });
 
-  // 3. Isolir Otomatis setiap hari jam 02:00
+  // 3. Isolir Otomatis setiap hari jam 02:00 — 30 hari setelah invoice masuk list penagihan
   cron.schedule('0 2 * * *', async () => {
     const today = new Date().getDate();
-    // Kita cek semua pelanggan setiap hari untuk isolir otomatis
-    logger.info(`[CRON] Menjalankan pengecekan isolir otomatis harian (Tanggal ${today})`);
+    logger.info(`[CRON] Menjalankan pengecekan isolir otomatis harian (Tanggal ${today}) — grace period 30 hari`);
 
+    const db = require('../config/database');
     const customers = customerSvc.getAllCustomers();
     let isolatedCount = 0;
     let skippedCount = 0;
@@ -180,38 +180,47 @@ function startCronJobs() {
     for (const c of customers) {
       // Safety net: kalau 1 customer error, jangan hentikan loop
       try {
-        // Cek apakah hari ini adalah tanggal isolirnya
-        const customerIsolirDay = c.isolate_day || 1;
+        // Hanya proses pelanggan aktif dengan tagihan belum bayar
+        if (c.status !== 'active' || (c.unpaid_count || 0) <= 0) continue;
 
-        if (today === customerIsolirDay) {
-          // Jika pelanggan aktif tapi punya tagihan belum bayar
-          if (c.status === 'active' && c.unpaid_count > 0) {
-            let attempt = 0;
-            const maxAttempts = 3;
-            let lastErr = null;
-            while (++attempt <= maxAttempts) {
-              try {
-                logger.info(`[CRON] Isolir otomatis pelanggan: ${c.name} (${c.pppoe_username}) - Tanggal Tagihan: ${customerIsolirDay}`);
-                // Gunakan fungsi terpusat untuk isolir
-                await customerSvc.suspendCustomer(c.id);
-                isolatedCount++;
-                lastErr = null;
-                break; // success
-              } catch (err) {
-                lastErr = err;
-                logger.error(`[CRON] Gagal isolir ${c.name} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
-                if (attempt < maxAttempts) {
-                  const delay = attempt * 5 * 1000; // 5s, 10s, 15s
-                  logger.info(`[CRON] Retry in ${delay/1000}s...`);
-                  await new Promise(r => setTimeout(r, delay));
-                }
-              }
-            }
-            if (lastErr) {
-              logger.error(`[CRON] Gagal isolir ${c.name} setelah ${maxAttempts} attempts: ${lastErr.message}`);
-              skippedCount++;
+        // Cari invoice unpaid tertua — isolir hanya kalau sudah 30+ hari sejak invoice dibuat
+        const oldestUnpaid = db.prepare(
+          "SELECT created_at, period_month, period_year FROM invoices WHERE customer_id = ? AND status = 'unpaid' ORDER BY created_at ASC LIMIT 1"
+        ).get(c.id);
+
+        if (!oldestUnpaid || !oldestUnpaid.created_at) continue;
+
+        const invoiceDate = new Date(oldestUnpaid.created_at);
+        const now = new Date();
+        const daysSinceInvoice = Math.floor((now - invoiceDate) / (1000 * 60 * 60 * 24));
+
+        if (daysSinceInvoice < 30) continue; // Belum 30 hari sejak invoice dibuat — beri kesempatan bayar
+
+        // Sudah 30+ hari sejak invoice — saatnya isolir
+        let attempt = 0;
+        const maxAttempts = 3;
+        let lastErr = null;
+        while (++attempt <= maxAttempts) {
+          try {
+            logger.info(`[CRON] Isolir otomatis: ${c.name} (${c.pppoe_username}) - Invoice ${oldestUnpaid.period_month}/${oldestUnpaid.period_year} sudah ${daysSinceInvoice} hari (≥30)`);
+            // Gunakan fungsi terpusat untuk isolir
+            await customerSvc.suspendCustomer(c.id);
+            isolatedCount++;
+            lastErr = null;
+            break; // success
+          } catch (err) {
+            lastErr = err;
+            logger.error(`[CRON] Gagal isolir ${c.name} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
+            if (attempt < maxAttempts) {
+              const delay = attempt * 5 * 1000; // 5s, 10s, 15s
+              logger.info(`[CRON] Retry in ${delay/1000}s...`);
+              await new Promise(r => setTimeout(r, delay));
             }
           }
+        }
+        if (lastErr) {
+          logger.error(`[CRON] Gagal isolir ${c.name} setelah ${maxAttempts} attempts: ${lastErr.message}`);
+          skippedCount++;
         }
       } catch (outerErr) {
         // Tangkap error per-customer supaya loop tidak berhenti
@@ -219,7 +228,7 @@ function startCronJobs() {
         skippedCount++;
       }
     }
-    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir, ${skippedCount} dilewati.`);
+    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir (≥30 hari), ${skippedCount} dilewati.`);
   });
 
   cron.schedule('0 10 * * *', async () => {
