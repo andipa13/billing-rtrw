@@ -711,8 +711,17 @@ async function addIsolirAddressList(ip, name = '', routerId = null) {
     const all = await addrListMenu.get();
     const exists = all.find(e => e.address === ip && e.list === 'ISOLIR-1-SEGMEN');
     if (!exists) {
-      await addrListMenu.add({ list: 'ISOLIR-1-SEGMEN', address: ip, comment: name });
-      logger.info(`[Mikrotik] Add ISOLIR-1-SEGMEN address-list: ${ip} (${name})`);
+      try {
+        await addrListMenu.add({ list: 'ISOLIR-1-SEGMEN', address: ip, comment: name });
+        logger.info(`[Mikrotik] Add ISOLIR-1-SEGMEN address-list: ${ip} (${name})`);
+      } catch (addErr) {
+        // Idempotent: "already have such entry" = sudah ada, tidak error
+        if (addErr.message && addErr.message.includes('already have such entry')) {
+          logger.info(`[Mikrotik] ISOLIR-1-SEGMEN address-list ${ip} already exists (idempotent)`);
+        } else {
+          throw addErr;
+        }
+      }
     }
     return true;
   } catch (e) {

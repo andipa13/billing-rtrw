@@ -167,10 +167,12 @@ function startCronJobs() {
     }
   });
 
-  // 3. Isolir Otomatis setiap hari jam 02:00 — 30 hari setelah invoice masuk list penagihan
+  // 3. Isolir Otomatis setiap hari jam 02:00
+  //    - auto_isolate = 1 (Tagihan): isolir kalau today >= isolate_day
+  //    - auto_isolate = 0 (Penagihan): isolir kalau invoice unpaid ≥ 30 hari
   cron.schedule('0 2 * * *', async () => {
     const today = new Date().getDate();
-    logger.info(`[CRON] Menjalankan pengecekan isolir otomatis harian (Tanggal ${today}) — grace period 30 hari`);
+    logger.info(`[CRON] Menjalankan pengecekan isolir otomatis harian (Tanggal ${today})`);
 
     const db = require('../config/database');
     const customers = customerSvc.getAllCustomers();
@@ -183,7 +185,7 @@ function startCronJobs() {
         // Hanya proses pelanggan aktif dengan tagihan belum bayar
         if (c.status !== 'active' || (c.unpaid_count || 0) <= 0) continue;
 
-        // Cari invoice unpaid tertua — isolir hanya kalau sudah 30+ hari sejak invoice dibuat
+        // Cari invoice unpaid tertua
         const oldestUnpaid = db.prepare(
           "SELECT created_at, period_month, period_year FROM invoices WHERE customer_id = ? AND status = 'unpaid' ORDER BY created_at ASC LIMIT 1"
         ).get(c.id);
@@ -194,15 +196,24 @@ function startCronJobs() {
         const now = new Date();
         const daysSinceInvoice = Math.floor((now - invoiceDate) / (1000 * 60 * 60 * 24));
 
-        if (daysSinceInvoice < 30) continue; // Belum 30 hari sejak invoice dibuat — beri kesempatan bayar
+        // Dua jalur:
+        // - auto_isolate = 1 (Tagihan): trigger berdasarkan isolate_day
+        // - auto_isolate = 0 (Penagihan): grace 30 hari sejak invoice
+        if (c.auto_isolate === 1) {
+          if (today < c.isolate_day) continue; // Belum waktunya isolir
+        } else {
+          // Penagihan (auto_isolate = 0): tunggu 30 hari
+          if (daysSinceInvoice < 30) continue;
+        }
 
-        // Sudah 30+ hari sejak invoice — saatnya isolir
+        // Saatnya isolir
         let attempt = 0;
         const maxAttempts = 3;
         let lastErr = null;
         while (++attempt <= maxAttempts) {
           try {
-            logger.info(`[CRON] Isolir otomatis: ${c.name} (${c.pppoe_username}) - Invoice ${oldestUnpaid.period_month}/${oldestUnpaid.period_year} sudah ${daysSinceInvoice} hari (≥30)`);
+            const triggerLabel = c.auto_isolate === 1 ? `Tagihan (isolate_day=${c.isolate_day})` : `Penagihan (${daysSinceInvoice} hari)`;
+            logger.info(`[CRON] Isolir otomatis: ${c.name} (${c.pppoe_username}) - ${triggerLabel} - Invoice ${oldestUnpaid.period_month}/${oldestUnpaid.period_year}`);
             // Gunakan fungsi terpusat untuk isolir
             await customerSvc.suspendCustomer(c.id);
             isolatedCount++;
@@ -228,7 +239,7 @@ function startCronJobs() {
         skippedCount++;
       }
     }
-    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir (≥30 hari), ${skippedCount} dilewati.`);
+    logger.info(`[CRON] Selesai pengecekan isolir. Total ${isolatedCount} pelanggan baru di-isolir, ${skippedCount} dilewati.`);
   });
 
   cron.schedule('0 10 * * *', async () => {

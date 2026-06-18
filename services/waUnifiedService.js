@@ -10,7 +10,12 @@ const { logger } = require('../config/logger');
 // ── helpers ────────────────────────────────────────────────────
 function cleanPhone(phone) {
   const cleaned = String(phone).replace(/[^0-9]/g, '');
-  return cleaned.startsWith('62') ? cleaned : '62' + cleaned.replace(/^0/, '');
+  // Sudah pakai kode negara Indonesia
+  if (cleaned.startsWith('62')) return cleaned;
+  // Nomor lokal Indonesia (mulai dengan 0)
+  if (cleaned.startsWith('0')) return '62' + cleaned.substring(1);
+  // Nomor dengan kode negara lain (60 Malaysia, 65 Singapore, dll) — jangan diutak-atik
+  return cleaned;
 }
 
 // ── FONNTE ─────────────────────────────────────────────────────
