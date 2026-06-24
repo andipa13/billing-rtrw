@@ -638,6 +638,95 @@ function startCronJobs() {
     }
   });
 
+  // ── 7. Cleanup Voucher Expired (pending + masa aktif habis) ────────────
+  // Jalan setiap jam, cek semua voucher pending yang masa aktifnya sudah lewat
+  cron.schedule('0 * * * *', async () => {
+    const db = require('../config/database');
+
+    // Helper: parse validity string ("12h", "1d", "4w2d", "30m") → ms
+    function validityToMs(v) {
+      if (!v) return 0;
+      const s = String(v).trim().toLowerCase();
+      let totalMin = 0;
+      const re = /(\d+)\s*([wdhm])/g;
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        const n = parseInt(m[1], 10);
+        if (m[2] === 'm') totalMin += n;
+        else if (m[2] === 'h') totalMin += n * 60;
+        else if (m[2] === 'd') totalMin += n * 60 * 24;
+        else if (m[2] === 'w') totalMin += n * 60 * 24 * 7;
+      }
+      return totalMin * 60 * 1000;
+    }
+
+    try {
+      const now = new Date();
+
+      // Ambil semua voucher pending dengan info batch
+      const expiredVouchers = db.prepare(`
+        SELECT v.id, v.code, v.router_id, v.status,
+               vb.validity, vb.profile_name, vb.router_id as batch_router_id,
+               v.created_at
+        FROM vouchers v
+        JOIN voucher_batches vb ON vb.id = v.batch_id
+        WHERE v.status = 'pending'
+      `).all();
+
+      let cleaned = 0;
+      let errors = 0;
+
+      for (const v of expiredVouchers) {
+        if (!v.validity) continue;
+
+        const validityMs = validityToMs(v.validity);
+        if (!validityMs) continue;
+
+        const createdAt = new Date(v.created_at);
+        const expiresAt = new Date(createdAt.getTime() + validityMs);
+
+        if (expiresAt > now) continue; // belum expired
+
+        // Masa aktif habis — cleanup
+        try {
+          const routerId = v.router_id || v.batch_router_id;
+
+          // Hapus dari MikroTik
+          if (routerId) {
+            try {
+              const { deleteHotspotUser, getHotspotUsers } = require('./mikrotikService');
+              const users = await getHotspotUsers(routerId);
+              const mtUser = users.find(u =>
+                u.name === v.code ||
+                (u.comment && u.comment.includes(`vc-${v.code}-${v.profile_name}`))
+              );
+              if (mtUser && mtUser['.id']) {
+                await deleteHotspotUser(mtUser['.id'], routerId);
+                logger.info(`[VoucherCleanup] Deleted from MikroTik: ${v.code}`);
+              }
+            } catch (mtErr) {
+              logger.warn(`[VoucherCleanup] MT delete failed for ${v.code}: ${mtErr.message}`);
+            }
+          }
+
+          // Update status di DB
+          db.prepare(`UPDATE vouchers SET status = 'expired' WHERE id = ?`).run(v.id);
+          logger.info(`[VoucherCleanup] Marked expired: ${v.code}`);
+          cleaned++;
+        } catch (err) {
+          logger.error(`[VoucherCleanup] Error cleaning voucher ${v.code}: ${err.message}`);
+          errors++;
+        }
+      }
+
+      if (cleaned > 0) {
+        logger.info(`[VoucherCleanup] Selesai: ${cleaned} voucher expired dibersihkan, ${errors} error.`);
+      }
+    } catch (e) {
+      logger.error('[VoucherCleanup] Cron error: ' + e.message);
+    }
+  });
+
   logger.info('[CRON] Semua tugas penjadwalan telah aktif.');
 }
 
