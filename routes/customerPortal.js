@@ -1451,7 +1451,26 @@ router.post('/payment/callback', express.raw({type: 'application/json'}), async 
           attempt++;
           const code = genRandomCode(6);
           const pass = code;
-          const comment = `pub-${orderId}-${code}-${fresh.profile_name}`;
+          // Hitung expiry date untuk Mikhmon Expire-Monitor
+          let expStr = '';
+          if (fresh.validity) {
+            const now = new Date();
+            const s = String(fresh.validity).toLowerCase();
+            let totalMin = 0;
+            const re = /(\d+)\s*([wdhm])/g;
+            let m;
+            while ((m = re.exec(s)) !== null) {
+              const n = parseInt(m[1], 10);
+              if (m[2] === 'm') totalMin += n;
+              else if (m[2] === 'h') totalMin += n * 60;
+              else if (m[2] === 'd') totalMin += n * 60 * 24;
+              else if (m[2] === 'w') totalMin += n * 60 * 24 * 7;
+            }
+            const expiresAt = new Date(now.getTime() + totalMin * 60 * 1000);
+            const pad = (n) => String(n).padStart(2, '0');
+            expStr = `${expiresAt.getFullYear()}-${pad(expiresAt.getMonth()+1)}-${pad(expiresAt.getDate())} ${pad(expiresAt.getHours())}:${pad(expiresAt.getMinutes())}:${pad(expiresAt.getSeconds())}`;
+          }
+          const comment = `${expStr} pub-${orderId}-${code}-${fresh.profile_name}`.trim();
           const userData = {
             server: 'all',
             name: code,

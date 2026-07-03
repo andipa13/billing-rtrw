@@ -157,57 +157,85 @@ function generateInvoiceForCustomer(customerId, month, year) {
 
 /**
  * Aturan rolling isolir (autoShiftIsolateDay):
- *   - Bayar TEPAT atau SEBELUM isolate_day (today <= currentDue) → isolate_day tetap.
- *   - Bayar LEWAT (today > currentDue) → isolate_day geser ke tanggal anchor:
+ *   - Bayar TEPAT atau SEBELUM jatuh tempo invoice → isolate_day tetap.
+ *   - Bayar LEWAT dari jatuh tempo → isolate_day geser ke tanggal anchor:
  *       1) overrideDay (dari form modal Lunas / aktivasi manual)
  *       2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
- *       3) Default: tanggal bayar hari ini (today). Jika bayar > jam 19:00 → +1 hari.
+ *       3) Default: tanggal bayar hari ini. Jika bayar > jam 19:00 → +1 hari.
  * Berlaku tanpa syarat status (active / suspended). Dipanggil dari semua path
  * pembayaran: billing page, penagihan, agent, WA bot, webhook.
+ *
+ * @param {number} customerId
+ * @param {number|null} overrideDay - anchor day dari form
+ * @param {number|null} invMonth - periode bulan invoice (1-12)
+ * @param {number|null} invYear - periode tahun invoice
  */
-function autoShiftIsolateDay(customerId, overrideDay = null) {
+function autoShiftIsolateDay(customerId, overrideDay = null, invMonth = null, invYear = null) {
   const row = db.prepare('SELECT isolate_day, status, last_unisolate_at FROM customers WHERE id=?').get(customerId);
   if (!row) return;
   const now = new Date();
   const currentDue = Number(row.isolate_day) || 10;
   const today = now.getDate();
+  const nowMonth = now.getMonth() + 1;
+  const nowYear = now.getFullYear();
 
-  // Hanya geser jika bayar lewat dari tanggal isolir bulan ini.
-  if (today > currentDue) {
-    // Prioritas anchor:
-    //   1) overrideDay (eksplisit, mis. dari form modal Lunas)
-    //   2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
-    //   3) Default: tanggal bayar hari ini. Jika > jam 19:00 → +1 hari.
-    let newDay = null;
-    if (overrideDay != null) {
-      const od = parseInt(overrideDay);
-      if (Number.isFinite(od) && od >= 1 && od <= 28) {
-        newDay = od;
-      }
+  // Jika periode invoice diberikan, hitung jatuh tempo invoice tersebut.
+  // Bayar sebelum jatuh tempo = EARLY → tidak geser.
+  if (invMonth != null && invYear != null) {
+    let dueMonth = invMonth;
+    let dueDay = currentDue;
+    if (currentDue === 1) {
+      // isolate_day=1: jatuh tempo tgl 1 bulan berikutnya
+      dueMonth = invMonth === 12 ? 1 : invMonth + 1;
+      const dueYear = invMonth === 12 ? invYear + 1 : invYear;
+      // Hari ini sebelum bulan jatuh tempo → EARLY
+      if (nowYear < dueYear || (nowYear === dueYear && nowMonth < dueMonth)) return;
+      // Sudah masuk bulan jatuh tempo, tapi sebelum tgl 1 → EARLY
+      if (nowYear === dueYear && nowMonth === dueMonth && today < dueDay) return;
+    } else {
+      // isolate_day>1: jatuh tempo tgl currentDue di bulan yg sama
+      // Hari ini sebelum bulan invoice → EARLY (bayar jauh-jauh hari)
+      if (nowYear < invYear || (nowYear === invYear && nowMonth < invMonth)) return;
+      // Bulan sama, tapi sebelum tgl jatuh tempo → EARLY
+      if (nowYear === invYear && nowMonth === invMonth && today <= currentDue) return;
     }
-    if (newDay == null && row.last_unisolate_at) {
-      // last_unisolate_at format YYYY-MM-DD
-      const parts = String(row.last_unisolate_at).split('-');
-      if (parts.length === 3) {
-        const y = parseInt(parts[0]);
-        const m = parseInt(parts[1]);
-        const d = parseInt(parts[2]);
-        if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d) && d >= 1 && d <= 28) {
-          newDay = d;
-        }
-      }
-    }
-    // Fallback: tanggal bayar hari ini. Jika > jam 19:00 WITA → +1 hari.
-    if (newDay == null) {
-      const hour = now.getHours();
-      newDay = hour >= 19 ? today + 1 : today;
-    }
-    // Update isolate_day
-    if (newDay != null) {
-      db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(newDay, customerId);
+  } else {
+    // Tidak ada konteks invoice → fallback ke logika lama (today vs isolate_day)
+    if (today <= currentDue) return;
+  }
+
+  // Sampai sini = pembayaran LEWAT jatuh tempo → geser.
+  // Prioritas anchor:
+  //   1) overrideDay (eksplisit, mis. dari form modal Lunas)
+  //   2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
+  //   3) Default: tanggal bayar hari ini. Jika > jam 19:00 → +1 hari.
+  let newDay = null;
+  if (overrideDay != null) {
+    const od = parseInt(overrideDay);
+    if (Number.isFinite(od) && od >= 1 && od <= 28) {
+      newDay = od;
     }
   }
-  // today <= currentDue (tepat waktu / bayar di muka) → isolir_day tetap.
+  if (newDay == null && row.last_unisolate_at) {
+    const parts = String(row.last_unisolate_at).split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0]);
+      const m = parseInt(parts[1]);
+      const d = parseInt(parts[2]);
+      if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d) && d >= 1 && d <= 28) {
+        newDay = d;
+      }
+    }
+  }
+  // Fallback: tanggal bayar hari ini. Jika > jam 19:00 WITA → +1 hari.
+  if (newDay == null) {
+    const hour = now.getHours();
+    newDay = hour >= 19 ? today + 1 : today;
+  }
+  // Update isolate_day
+  if (newDay != null) {
+    db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(newDay, customerId);
+  }
 }
 
 function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes, overrideDay = null) {
@@ -228,7 +256,7 @@ function payInvoiceForCustomerPeriod(customerId, month, year, paidByName, notes,
 
   const ensure = generateInvoiceForCustomer(cid, m, y);
   markAsPaid(ensure.invoiceId, paidByName, notes);
-  autoShiftIsolateDay(cid, overrideDay);
+  autoShiftIsolateDay(cid, overrideDay, m, y);
   return { created: ensure.created, paid: true, alreadyPaid: false, invoiceId: ensure.invoiceId, customerName: ensure.customerName };
 }
 
@@ -279,7 +307,7 @@ function payInvoicesForCustomerMonths(customerId, year, months, paidByName, note
     }
   });
   run();
-  autoShiftIsolateDay(cid, overrideDay);
+  autoShiftIsolateDay(cid, overrideDay, selectedMonths[selectedMonths.length - 1], y);
   return summary;
 }
 
@@ -367,8 +395,8 @@ function markAsPaid(invoiceId, paidByName, notes, actor = null, overrideDay = nu
 
   // Auto-shift due date jika bayar telat
   if (result.changes > 0) {
-    const invRow = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(invoiceId);
-    if (invRow) autoShiftIsolateDay(invRow.customer_id, overrideDay);
+    const invRow = db.prepare('SELECT customer_id, period_month, period_year FROM invoices WHERE id=?').get(invoiceId);
+    if (invRow) autoShiftIsolateDay(invRow.customer_id, overrideDay, invRow.period_month, invRow.period_year);
   }
 
   // Catat audit trail jika berhasil

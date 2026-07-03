@@ -277,7 +277,7 @@ async function createVoucherBatchAsync(batchId) {
           const createdAt = new Date();
           const expiresAt = new Date(createdAt.getTime() + validityToMs(batch.validity));
           const expStr = formatExpireMonitorDate(expiresAt); // "2026-06-10 23:59:59"
-          const comment = `vc-${generated.userCode}-${batch.profile_name} ${expStr}`;
+          const comment = `${expStr} vc-${generated.userCode}-${batch.profile_name}`;
           const userData = {
             server: 'all',
             name: generated.userCode,
@@ -3967,7 +3967,7 @@ router.post('/penagihan/partial-pay', requireAdminSession, express.json(), async
         const anchor = (req.body && req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '')
           ? parseInt(req.body.activate_anchor_day)
           : null;
-        billingSvc.autoShiftIsolateDay(inv.customer_id, anchor);
+        billingSvc.autoShiftIsolateDay(inv.customer_id, anchor, inv.period_month, inv.period_year);
       }
     } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
     // Re-enable auto_isolate jika semua invoice lunas
@@ -4019,7 +4019,7 @@ router.post('/penagihan/lunas', requireAdminSession, express.json(), async (req,
       const anchor = (req.body && req.body.activate_anchor_day != null && req.body.activate_anchor_day !== '')
         ? parseInt(req.body.activate_anchor_day)
         : null;
-      billingSvc.autoShiftIsolateDay(inv.customer_id, anchor);
+      billingSvc.autoShiftIsolateDay(inv.customer_id, anchor, inv.period_month, inv.period_year);
     }
   } catch (e) { logger.warn('autoShiftIsolateDay skip: ' + e.message); }
 

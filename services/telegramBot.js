@@ -664,14 +664,35 @@ function initTelegram() {
         if (!meta) throw new Error('Data harga/durasi profil tidak ditemukan (Format Mikhmon)');
 
         const pin = Math.floor(1000 + Math.random() * 9000).toString();
-        
+
+        // Hitung expiry date untuk Mikhmon Expire-Monitor
+        const now = new Date();
+        const validityMs = (() => {
+          if (!meta.validity) return 0;
+          const s = String(meta.validity).toLowerCase();
+          let totalMin = 0;
+          const re = /(\d+)\s*([wdhm])/g;
+          let m;
+          while ((m = re.exec(s)) !== null) {
+            const n = parseInt(m[1], 10);
+            if (m[2] === 'm') totalMin += n;
+            else if (m[2] === 'h') totalMin += n * 60;
+            else if (m[2] === 'd') totalMin += n * 60 * 24;
+            else if (m[2] === 'w') totalMin += n * 60 * 24 * 7;
+          }
+          return totalMin * 60 * 1000;
+        })();
+        const expiresAt = new Date(now.getTime() + validityMs);
+        const pad = (n) => String(n).padStart(2, '0');
+        const expStr = `${expiresAt.getFullYear()}-${pad(expiresAt.getMonth()+1)}-${pad(expiresAt.getDate())} ${pad(expiresAt.getHours())}:${pad(expiresAt.getMinutes())}:${pad(expiresAt.getSeconds())}`;
+
         await mikrotikSvc.addHotspotUser({
           server: 'all',
           name: pin,
           password: pin,
           profile: profileName,
           'limit-uptime': meta.validity,
-          comment: `vc-${pin}-${profileName}`
+          comment: `${expStr} vc-${pin}-${profileName}`
         });
         
         let res = `*🎫 VOUCHER BERHASIL (INSTAN)*\n\n`;

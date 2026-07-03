@@ -86,14 +86,20 @@ function startCronJobs() {
 
         if (today !== h1) continue; // Bukan hari generate untuk pelanggan ini
 
-        // Tentukan periode: bulan berjalan
-        // Jika isolate_day sudah lewat bulan ini (misal isolate_day=5, sekarang tgl 4 bulan depan),
-        // tetap generate untuk bulan berjalan
+        // Tentukan periode tagihan:
+        // - isolate_day=1 → invoice untuk BULAN DEPAN (bayar tgl 1 untuk pemakaian bulan depan)
+        // - isolate_day>1 → invoice untuk bulan berjalan
+        let invMonth = month;
+        let invYear = year;
+        if (dueDay === 1) {
+          invMonth = month === 12 ? 1 : month + 1;
+          invYear = month === 12 ? year + 1 : year;
+        }
         try {
-          const result = billingSvc.generateInvoiceForCustomer(c.id, month, year);
+          const result = billingSvc.generateInvoiceForCustomer(c.id, invMonth, invYear);
           if (result.created) {
             created++;
-            logger.info(`[CRON] Invoice bulan ${month}/${year} dibuat untuk ${result.customerName} (isolir tgl ${dueDay})`);
+            logger.info(`[CRON] Invoice bulan ${invMonth}/${invYear} dibuat untuk ${result.customerName} (isolir tgl ${dueDay})`);
           }
         } catch (err) {
           logger.error(`[CRON] Gagal generate invoice untuk customer ${c.id}: ${err.message}`);
@@ -304,8 +310,16 @@ function startCronJobs() {
       if (unpaidCount <= 0) continue;
 
       const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 1) || 1) || 1;
-      const remind1 = dueDay - 1;
-      const shouldSend = remind1 >= 1 && day === remind1;
+      // H-1 sebelum isolir — handle wrap-around untuk isolate_day=1
+      let remind1;
+      if (dueDay === 1) {
+        // H-1 dari tgl 1 = hari terakhir bulan ini
+        const now = new Date();
+        remind1 = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      } else {
+        remind1 = dueDay - 1;
+      }
+      const shouldSend = day === remind1;
       if (!shouldSend) continue;
 
       targetCustomers.push(c);
