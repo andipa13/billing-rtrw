@@ -682,18 +682,23 @@ function initTelegram() {
           }
           return totalMin * 60 * 1000;
         })();
-        const expiresAt = new Date(now.getTime() + validityMs);
-        const pad = (n) => String(n).padStart(2, '0');
-        const expStr = `${expiresAt.getFullYear()}-${pad(expiresAt.getMonth()+1)}-${pad(expiresAt.getDate())} ${pad(expiresAt.getHours())}:${pad(expiresAt.getMinutes())}:${pad(expiresAt.getSeconds())}`;
+        let expStr = '';
+        if (meta.validity) {
+          const expiresAt = new Date(now.getTime() + validityMs);
+          const pad = (n) => String(n).padStart(2, '0');
+          expStr = `${expiresAt.getFullYear()}-${pad(expiresAt.getMonth()+1)}-${pad(expiresAt.getDate())} ${pad(expiresAt.getHours())}:${pad(expiresAt.getMinutes())}:${pad(expiresAt.getSeconds())}`;
+        }
 
-        await mikrotikSvc.addHotspotUser({
+        const voucherData = {
           server: 'all',
           name: pin,
           password: pin,
           profile: profileName,
-          'limit-uptime': meta.validity,
-          comment: `${expStr} vc-${pin}-${profileName}`
-        });
+          comment: `${expStr} vc-${pin}-${profileName}`.trim()
+        };
+        if (meta.validity) voucherData['limit-uptime'] = meta.validity;
+
+        await mikrotikSvc.addHotspotUser(voucherData);
         
         let res = `*🎫 VOUCHER BERHASIL (INSTAN)*\n\n`;
         res += `🎫 KODE VOUCHER: \`${pin}\`\n`;

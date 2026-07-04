@@ -275,9 +275,12 @@ async function createVoucherBatchAsync(batchId) {
           // Expire monitor expects comment format: "YYYY-MM-DD HH:MM:SS" or "MMM/DD/YYYY HH:MM:SS" + optional mode flag.
           // Build expiry = created_at (now) + batch.validity, e.g. validity="12h" → +12 hours.
           const createdAt = new Date();
-          const expiresAt = new Date(createdAt.getTime() + validityToMs(batch.validity));
-          const expStr = formatExpireMonitorDate(expiresAt); // "2026-06-10 23:59:59"
-          const comment = `${expStr} vc-${generated.userCode}-${batch.profile_name}`;
+          let expStr = '';
+          if (batch.validity) {
+            const expiresAt = new Date(createdAt.getTime() + validityToMs(batch.validity));
+            expStr = formatExpireMonitorDate(expiresAt); // "2026-06-10 23:59:59"
+          }
+          const comment = `${expStr} vc-${generated.userCode}-${batch.profile_name}`.trim();
           const userData = {
             server: 'all',
             name: generated.userCode,
