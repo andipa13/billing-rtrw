@@ -8,8 +8,8 @@ function formatRupiah(amount) {
 function numberToWords(num) {
   const units = ['', 'Ribu', 'Juta', 'Miliar', 'Triliun'];
   const ones = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan'];
-  const tens = ['', 'Sepuluh', 'Sebelas', 'Dua Belas', 'Tiga Belas', 'Empat Belas', 'Lima Belas', 'Enam Belas', 'Tujuh Belas', 'Delapan Belas', 'Sembilan Belas'];
-  const twenties = ['', 'Dua Puluh', 'Tiga Puluh', 'Empat Puluh', 'Lima Puluh', 'Enam Puluh', 'Tujuh Puluh', 'Delapan Puluh', 'Sembilan Puluh'];
+  const tensNames = ['', 'Sepuluh', 'Sebelas', 'Dua Belas', 'Tiga Belas', 'Empat Belas', 'Lima Belas', 'Enam Belas', 'Tujuh Belas', 'Delapan Belas', 'Sembilan Belas'];
+  const twenties = ['', '', 'Dua Puluh', 'Tiga Puluh', 'Empat Puluh', 'Lima Puluh', 'Enam Puluh', 'Tujuh Puluh', 'Delapan Puluh', 'Sembilan Puluh'];
 
   if (num === 0) return 'Nol';
   
@@ -30,7 +30,7 @@ function numberToWords(num) {
         chunkWords.push(twenties[tens]);
         if (unitsDigit > 0) chunkWords.push(ones[unitsDigit]);
       } else if (tens === 1) {
-        chunkWords.push(tens[unitsDigit + 1] || tens[1]); // tens[1] is 'Sepuluh'
+        chunkWords.push(tensNames[unitsDigit + 1] || tensNames[1]); // tensNames[1] is 'Sepuluh'
       } else if (unitsDigit > 0) {
         chunkWords.push(ones[unitsDigit]);
       }

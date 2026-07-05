@@ -179,6 +179,15 @@ function autoShiftIsolateDay(customerId, overrideDay = null, invMonth = null, in
   const nowMonth = now.getMonth() + 1;
   const nowYear = now.getFullYear();
 
+  // Jika overrideDay diberikan eksplisit (dari form/aktivasi manual), langsung geser tanpa cek jatuh tempo.
+  if (overrideDay != null) {
+    const od = parseInt(overrideDay);
+    if (Number.isFinite(od) && od >= 1 && od <= 28 && od !== currentDue) {
+      db.prepare('UPDATE customers SET isolate_day = ? WHERE id = ?').run(od, customerId);
+    }
+    return;
+  }
+
   // Jika periode invoice diberikan, hitung jatuh tempo invoice tersebut.
   // Bayar sebelum jatuh tempo = EARLY → tidak geser.
   if (invMonth != null && invYear != null) {
@@ -205,17 +214,10 @@ function autoShiftIsolateDay(customerId, overrideDay = null, invMonth = null, in
   }
 
   // Sampai sini = pembayaran LEWAT jatuh tempo → geser.
-  // Prioritas anchor:
-  //   1) overrideDay (eksplisit, mis. dari form modal Lunas)
-  //   2) last_unisolate_at (auto-recorded saat admin buka isolir manual)
-  //   3) Default: tanggal bayar hari ini. Jika > jam 19:00 → +1 hari.
+  // Prioritas anchor (overrideDay sudah ditangani di atas, tidak akan sampai sini):
+  //   1) last_unisolate_at (auto-recorded saat admin buka isolir manual)
+  //   2) Default: tanggal bayar hari ini. Jika > jam 19:00 → +1 hari.
   let newDay = null;
-  if (overrideDay != null) {
-    const od = parseInt(overrideDay);
-    if (Number.isFinite(od) && od >= 1 && od <= 28) {
-      newDay = od;
-    }
-  }
   if (newDay == null && row.last_unisolate_at) {
     const parts = String(row.last_unisolate_at).split('-');
     if (parts.length === 3) {
@@ -280,7 +282,7 @@ function payInvoicesForCustomerMonths(customerId, year, months, paidByName, note
   const selectInv = db.prepare('SELECT id, status, amount FROM invoices WHERE customer_id=? AND period_month=? AND period_year=? LIMIT 1');
   const insertInv = db.prepare('INSERT INTO invoices (customer_id, period_month, period_year, amount, notes) VALUES (?, ?, ?, ?, ?)');
   const bumpPromo = db.prepare('UPDATE customers SET promo_cycles_used = COALESCE(promo_cycles_used,0) + 1 WHERE id=?');
-  const payInv = db.prepare(`UPDATE invoices SET status='paid', paid_at=CURRENT_TIMESTAMP, paid_by_name=?, notes=? WHERE id=?`);
+  const payInv = db.prepare(`UPDATE invoices SET status='paid', paid_at=datetime('now', '+8 hours'), paid_by_name=?, notes=? WHERE id=?`);
 
   const summary = { customerName: customer.name, year: y, paidMonths: [], alreadyPaidMonths: [], createdMonths: [], totalAmount: 0, totalMonths: 0 };
   const run = db.transaction(() => {
