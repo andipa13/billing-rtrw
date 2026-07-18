@@ -18,6 +18,7 @@ function initTelegram() {
   if (!enabled || !token) {
     if (bot) {
       try { bot.stopPolling(); } catch (e) {}
+      if (bot._heartbeatInterval) { clearInterval(bot._heartbeatInterval); bot._heartbeatInterval = null; }
       bot = null;
       logger.info('Telegram Bot: Dihentikan (Nonaktif)');
     }
@@ -27,6 +28,7 @@ function initTelegram() {
   // Jika token berubah, kita harus stop bot lama dan buat baru
   if (bot && bot.token !== token) {
     try { bot.stopPolling(); } catch (e) {}
+    if (bot._heartbeatInterval) { clearInterval(bot._heartbeatInterval); bot._heartbeatInterval = null; }
     bot = null;
     logger.info('Telegram Bot: Token berubah, me-restart bot...');
   }
@@ -46,6 +48,19 @@ function initTelegram() {
     bot.setWebHook(`${webhookUrl}/api/telegram-webhook/${token}`).then(r => {
       logger.info(`Telegram Bot: setWebHook result = ${JSON.stringify(r)}`);
     }).catch(e => logger.error('Telegram Bot setWebHook error:', e.message));
+
+    // Heartbeat: re-register webhook tiap 30 menit untuk antisipasi tunnel down→up
+    // Telegram berhenti kirim update kalau webhook fail berkali-kali; re-register memastikan delivery resume.
+    if (bot._heartbeatInterval) clearInterval(bot._heartbeatInterval);
+    bot._heartbeatInterval = setInterval(() => {
+      if (!bot) return;
+      bot.setWebHook(`${webhookUrl}/api/telegram-webhook/${token}`).then(r => {
+        logger.info(`Telegram Bot: heartbeat setWebHook OK (result=${JSON.stringify(r)})`);
+      }).catch(e => {
+        logger.error(`Telegram Bot: heartbeat setWebHook FAIL: ${e.message}`);
+      });
+    }, 30 * 60 * 1000); // 30 menit
+
     // Lanjut mount handlers di bawah (jangan return di sini)
   } else {
     // Polling mode (fallback)
