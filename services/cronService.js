@@ -116,63 +116,6 @@ function startCronJobs() {
     }
   });
 
-  // 2. Notif WA setiap hari jam 10:30
-  cron.schedule('30 10 * * *', async () => {
-    const enabled = getSetting('whatsapp_auto_billing_enabled', false);
-    const waEnabled = getSetting('whatsapp_enabled', false) || getSetting('wa_evolution_enabled', false);
-    if (!enabled || !waEnabled) return;
-
-    let sendWA;
-    try {
-      const mod = await import('./evolutionService.js');
-      sendWA = mod.sendWhatsApp;
-    } catch (e) {
-      logger.error(`[CRON] Gagal load WhatsApp bot: ${e.message || e}`);
-      return;
-    }
-
-    const resolveBaseUrl = () => {
-      const explicit = String(getSetting('public_base_url', '') || '').trim();
-      if (explicit) return explicit.replace(/\/+$/, '');
-
-      const hostRaw = String(getSetting('server_host', 'localhost') || 'localhost').trim();
-      const port = Number(getSetting('server_port', 3001) || 3001);
-      const hasProto = /^https?:\/\//i.test(hostRaw);
-      const proto = port === 443 ? 'https' : 'http';
-      const host = hasProto ? hostRaw.replace(/\/+$/, '') : `${proto}://${hostRaw}`;
-      const withPort = (port === 80 || port === 443) ? host : `${host}:${port}`;
-      return withPort.replace(/\/+$/, '');
-    };
-
-    const loginLink = `${resolveBaseUrl()}/customer/dashboard`;
-    const baseDelayMs = (Number(getSetting('whatsapp_broadcast_delay', 5) || 5) * 1000); // Default 5 detik
-    const batchSize = 15; // 15 pesan per batch (dari 20)
-    const batchPauseMs = 120000; // Pause 2 menit setelah batch (dari 1 menit)
-
-    const today = new Date();
-    const day = today.getDate();
-
-    const customers = customerSvc.getAllCustomers();
-    let targetCount = 0;
-    let sent = 0;
-    let failed = 0;
-    let batchCount = 0;
-
-    const defaultTemplate =
-      `⚠️ *PENGINGAT PEMBAYARAN*\n\n` +
-      `Yth. Pelanggan ZYA NET,\n` +
-      `Tagihan Anda akan jatuh tempo. Segera lakukan pembayaran untuk menghindari isolir.\n\n` +
-      `📅 *Tgl Isolir:* {{tgl_isolir}}\n` +
-      `🔑 *ID Login:* {{id}}\n\n` +
-      `Bayar di sini:\nbillingzyandra.zyanet.cloud/customer/dashboard\n\n` +
-      `*ZYA - NET* 🌐\n` +
-      `_Internet Stabil & Unlimited_`;
-
-    for (const c of customers) {
-        // ... (sisanya tidak berubah) ...
-    }
-  });
-
   // 3. Isolir Otomatis setiap hari jam 02:00
   //    - auto_isolate = 1 (Tagihan): isolir kalau today >= isolate_day
   //    - auto_isolate = 0 (Penagihan): isolir kalau invoice unpaid ≥ 30 hari

@@ -48,3 +48,6 @@ send_*.py
 # Graphify tool output (generated)
 graphify-out/
 
+# Generated result files
+*_result.json
+
