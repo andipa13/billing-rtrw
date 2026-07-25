@@ -442,20 +442,32 @@ function startCronJobs() {
 
     try {
       const routers = mikrotikService.getAllRouters();
+      // Fallback single-router mode: jika tabel routers kosong, pakai koneksi default
+      // dari settings.json (mikrotik_host) — sama seperti getConnection(null) di fitur lain.
+      const routerTargets = (routers && routers.length > 0) ? routers : [{ id: null, name: 'default' }];
       const customers = customerSvc.getAllCustomers();
       const customerMap = new Map();
       customers.forEach(c => { if (c.pppoe_username) customerMap.set(c.pppoe_username, c); });
 
-      for (const r of routers) {
+      for (const r of routerTargets) {
+        let conn = null;
         try {
-          const actives = await mikrotikService.getPppoeActive(r.id);
-          for (const s of actives) {
-            const username = s.name;
+          // Counter bytes TIDAK ada di /ppp/active — ambil dari /interface per pppoe-<username>
+          // tx-byte (router->user) = download user, rx-byte (user->router) = upload user
+          conn = await mikrotikService.getConnection(r.id);
+          const ifaces = await conn.client.menu('/interface').get();
+          for (const row of (Array.isArray(ifaces) ? ifaces : [])) {
+            const ifName = String(row.name || '');
+            // Interface dinamis PPPoE: '<pppoe-username>' (statis: 'pppoe-username')
+            const m = ifName.match(/^<pppoe-(.+)>$/) || ifName.match(/^pppoe-(.+)$/);
+            if (!m) continue;
+            const username = m[1];
             const cust = customerMap.get(username);
             if (!cust) continue;
 
-            const totalIn = parseInt(s['bytes-in']) || 0;
-            const totalOut = parseInt(s['bytes-out']) || 0;
+            // Simpan dari perspektif user: bytes_in = download (tx router), bytes_out = upload (rx router)
+            const userDown = parseInt(row.txByte !== undefined ? row.txByte : row['tx-byte']) || 0;
+            const userUp = parseInt(row.rxByte !== undefined ? row.rxByte : row['rx-byte']) || 0;
 
             const now = new Date();
             const currentUsage = usageSvc.getUsage(cust.id, now.getMonth()+1, now.getFullYear());
@@ -465,24 +477,26 @@ function startCronJobs() {
 
             if (currentUsage) {
               // Jika total bytes saat ini lebih kecil dari sebelumnya, berarti user baru reconnect (counter reset di mikrotik)
-              if (totalIn < currentUsage.last_total_bytes_in || totalOut < currentUsage.last_total_bytes_out) {
-                deltaIn = totalIn;
-                deltaOut = totalOut;
+              if (userDown < currentUsage.last_total_bytes_in || userUp < currentUsage.last_total_bytes_out) {
+                deltaIn = userDown;
+                deltaOut = userUp;
               } else {
-                deltaIn = totalIn - currentUsage.last_total_bytes_in;
-                deltaOut = totalOut - currentUsage.last_total_bytes_out;
+                deltaIn = userDown - currentUsage.last_total_bytes_in;
+                deltaOut = userUp - currentUsage.last_total_bytes_out;
               }
             } else {
-              deltaIn = totalIn;
-              deltaOut = totalOut;
+              deltaIn = userDown;
+              deltaOut = userUp;
             }
 
             if (deltaIn > 0 || deltaOut > 0) {
-              usageSvc.updateUsage(cust.id, deltaIn, deltaOut, totalIn, totalOut);
+              usageSvc.updateUsage(cust.id, deltaIn, deltaOut, userDown, userUp);
             }
           }
         } catch (err) {
           logger.error(`[CRON] Gagal track usage di router ${r.name}: ${err.message}`);
+        } finally {
+          if (conn && conn.api) { try { conn.api.close(); } catch (e) {} }
         }
       }
     } catch (e) {

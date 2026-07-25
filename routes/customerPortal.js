@@ -233,6 +233,7 @@ const {
   updateSSID,
   updatePassword,
   requestReboot,
+  requestRefresh,
   updateCustomerTag
 } = customerDevice;
 
@@ -956,11 +957,26 @@ router.post('/change-ssid', async (req, res) => {
   const phone = req.session && req.session.phone;
   if (!phone) return res.redirect('/customer/login');
   const { ssid } = req.body;
+  const wifiPass = String(req.body.wifi_password || '').trim();
   const ok = await updateSSID(phone, ssid);
-  
-  req.session._msg = ok 
-    ? { type: 'success', text: 'Nama WiFi (SSID) berhasil diubah.' }
-    : { type: 'danger', text: 'Gagal mengubah SSID.' };
+
+  // Jika form juga membawa password WiFi baru, update sekaligus (satu tombol "Update Konfigurasi")
+  let passOk = null;
+  if (wifiPass) {
+    passOk = await updatePassword(phone, wifiPass);
+  }
+
+  let msg;
+  if (ok && (passOk === null || passOk === true)) {
+    msg = { type: 'success', text: passOk ? 'Konfigurasi WiFi (SSID & password) berhasil diupdate.' : 'Nama WiFi (SSID) berhasil diubah.' };
+  } else if (ok && passOk === false) {
+    msg = { type: 'warning', text: 'SSID berhasil diubah, tetapi password gagal. Pastikan minimal 8 karakter.' };
+  } else if (!ok && passOk === true) {
+    msg = { type: 'warning', text: 'Password WiFi berhasil diubah, tetapi SSID gagal diubah.' };
+  } else {
+    msg = { type: 'danger', text: 'Gagal mengubah konfigurasi WiFi.' };
+  }
+  req.session._msg = msg;
     
   res.redirect('/customer/dashboard');
 });
@@ -986,6 +1002,18 @@ router.post('/reboot', async (req, res) => {
   req.session._msg = r.ok
     ? { type: 'success', text: 'Perangkat berhasil direboot. Silakan tunggu beberapa menit.' }
     : { type: 'danger', text: r.message || 'Gagal reboot.' };
+
+  res.redirect('/customer/dashboard');
+});
+
+router.post('/refresh', async (req, res) => {
+  const phone = req.session && req.session.phone;
+  if (!phone) return res.redirect('/customer/login');
+  const r = await requestRefresh(phone);
+
+  req.session._msg = r.ok
+    ? { type: 'success', text: r.message }
+    : { type: 'danger', text: r.message || 'Gagal refresh data perangkat.' };
 
   res.redirect('/customer/dashboard');
 });

@@ -265,6 +265,33 @@ function mapDeviceData(device, tag) {
     }
   } catch (e) {}
 
+  // ZTE F670L & beberapa ONT: perangkat terdaftar di WLANConfiguration.*.AssociatedDevice
+  // (bukan Hosts.Host yang sering kosong)
+  try {
+    const wlans = device?.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration;
+    if (wlans && typeof wlans === 'object') {
+      for (const wlanKey in wlans) {
+        if (isNaN(wlanKey)) continue;
+        const assoc = wlans[wlanKey]?.AssociatedDevice;
+        if (!assoc || typeof assoc !== 'object') continue;
+        for (const devKey in assoc) {
+          if (isNaN(devKey)) continue;
+          const dev = assoc[devKey];
+          const mac = dev?.AssociatedDeviceMACAddress?._value || '';
+          if (!mac || connectedUsers.some(u => u.mac === mac)) continue;
+          const ip = dev?.AssociatedDeviceIPAddress?._value || '-';
+          connectedUsers.push({
+            hostname: mac ? ('Perangkat ' + mac.slice(-5)) : '-',
+            ip,
+            mac,
+            iface: 'WiFi',
+            status: 'Online'
+          });
+        }
+      }
+    }
+  } catch (e) {}
+
   const rxPower = getParameterWithPaths(device, parameterPaths.rxPower);
   const pppoeIP = getParameterWithPaths(device, parameterPaths.pppoeIP);
   const pppoeUsername = getParameterWithPaths(device, parameterPaths.pppUsername);
@@ -642,6 +669,32 @@ async function updateCustomerTag(oldTag, newTag) {
   }
 }
 
+async function requestRefresh(tag) {
+  const device = await resolveDeviceToken(tag);
+  if (!device || !device._id) return { ok: false, message: 'Perangkat tidak ditemukan.' };
+  const settings = getSettingsWithCache();
+  const genieacsUrl = settings.genieacs_url || 'http://localhost:7557';
+  const auth = { username: settings.genieacs_username || '', password: settings.genieacs_password || '' };
+  const tasksUrl = `${genieacsUrl}/devices/${encodeURIComponent(device._id)}/tasks`;
+  const objects = [
+    'InternetGatewayDevice.DeviceInfo',
+    'InternetGatewayDevice.LANDevice.1.Hosts',
+    'InternetGatewayDevice.LANDevice.1.WLANConfiguration',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice',
+    'Device.WiFi',
+    'Device.Hosts'
+  ];
+  let sent = 0;
+  for (const obj of objects) {
+    try {
+      await axios.post(tasksUrl, { name: 'refreshObject', objectName: obj }, { auth, timeout: 15000 });
+      sent++;
+    } catch (e) {}
+  }
+  if (sent > 0) return { ok: true, message: 'Permintaan refresh data terkirim ke perangkat. Data akan diperbarui dalam beberapa saat.' };
+  return { ok: false, message: 'Gagal mengirim refresh ke GenieACS.' };
+}
+
 module.exports = {
   findDeviceByTag,
   findDeviceByPppoe,
@@ -653,6 +706,7 @@ module.exports = {
   updateSSID,
   updatePassword,
   requestReboot,
+  requestRefresh,
   updateCustomerTag,
   listDevicesWithTags,
   listAllDevices,
