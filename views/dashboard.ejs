@@ -424,7 +424,23 @@
 
     .footer { text-align: center; padding: 30px 0 20px; color: var(--text-muted); }
 
-    #home-section, #billing-section, #ticket-section, #settings-section, #usage-section {
+    /* ===== WiFi Top Card ===== */
+    .wifi-top-card {
+      border-color: #bfdbfe;
+      background: linear-gradient(135deg, #ffffff 0%, #f0f5ff 100%);
+    }
+    .wifi-top-card .card-header {
+      background: transparent;
+      border-bottom-color: #dbeafe;
+      color: #1d4ed8;
+    }
+    .wifi-top-card .card-header i { color: #2563eb; }
+    .wifi-top-card .btn-update {
+      background: #2563eb;
+    }
+    .wifi-top-card .btn-update:hover { background: #1d4ed8; }
+
+    #home-section, #billing-section, #ticket-section, #usage-section, #wifi-top-section {
       scroll-margin-top: 90px;
     }
   </style>
@@ -467,6 +483,60 @@
           if (notif) notif.classList.remove('show');
         }, 4000);
       </script>
+
+      <!-- ===== WiFi CARD (paling atas) ===== -->
+      <div class="card mb-4 wifi-top-card" id="wifi-top-section">
+        <div class="card-header">
+          <i class="bi bi-wifi me-2"></i>Konfigurasi WiFi
+          <% if (customer.ssid && customer.ssid !== '-') { %>
+            <span class="badge bg-light text-dark ms-2" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;">
+              <i class="bi bi-check-circle-fill text-success me-1" style="font-size:9px"></i>Terhubung
+            </span>
+          <% } %>
+        </div>
+        <div class="card-body">
+          <form method="POST" action="/customer/change-ssid" id="wifiTopForm">
+            <div class="row g-3 align-items-end">
+              <div class="col-12 col-sm-5">
+                <label class="form-label" for="wifiTopSsid">
+                  <i class="bi bi-tag me-1"></i>Nama WiFi (SSID)
+                </label>
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-wifi" style="font-size:20px;color:var(--accent);flex-shrink:0"></i>
+                  <input type="text" class="form-control" id="wifiTopSsid" name="ssid"
+                    value="<%= customer.ssid !== '-' ? customer.ssid : '' %>"
+                    placeholder="Nama WiFi baru" required maxlength="32">
+                </div>
+                <div class="stat-sub mt-1"><i class="bi bi-info-circle me-1"></i>5GHz otomatis menjadi <strong>&lt;SSID&gt;-5G</strong></div>
+              </div>
+              <div class="col-12 col-sm-5">
+                <label class="form-label" for="wifiTopPass">
+                  <i class="bi bi-lock me-1"></i>Password WiFi
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text bg-white" style="border-right:none;border-color:#cbd5e1">
+                    <i class="bi bi-key" style="color:var(--text-muted)"></i>
+                  </span>
+                  <input type="password" class="form-control" id="wifiTopPass" name="wifi_password"
+                    placeholder="Kosongkan jika tidak ingin ganti" minlength="8" maxlength="63"
+                    autocomplete="off" data-lpignore="true" data-form-type="other"
+                    style="border-left:none">
+                  <button class="pass-toggle" type="button" id="wifiTopPassToggle" aria-label="Tampilkan password"
+                    style="border:1px solid #cbd5e1;border-left:none;border-radius:0 10px 10px 0;background:#fff;padding:0 12px;color:var(--text-muted)">
+                    <i class="bi bi-eye" id="wifiTopPassToggleIcon"></i>
+                  </button>
+                </div>
+                <div class="stat-sub mt-1"><i class="bi bi-info-circle me-1"></i>Minimal 8 karakter. Kosongkan jika tidak diganti.</div>
+              </div>
+              <div class="col-12 col-sm-2">
+                <button type="submit" class="btn-update w-100" style="padding:10px 12px;white-space:nowrap">
+                  <i class="bi bi-check-lg me-1"></i>Simpan
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <!-- ===== 4 SUMMARY CARDS ===== -->
       <div class="stats-grid">
@@ -625,35 +695,23 @@
             </div>
           </div>
 
-          <!-- Card Pengaturan WiFi -->
-          <div class="card mb-4" id="settings-section">
+          <!-- Card Status WiFi (ringkas) -->
+          <div class="card mb-4">
             <div class="card-header">
-              <i class="bi bi-gear me-2"></i>Pengaturan WiFi
+              <i class="bi bi-wifi me-2"></i>Status WiFi
             </div>
-            <div class="card-body">
-              <form method="POST" action="/customer/change-ssid" id="wifiForm">
-                <div class="mb-3">
-                  <label class="form-label" for="ssidInput">Nama WiFi (SSID)</label>
-                  <input type="text" class="form-control" id="ssidInput" name="ssid"
-                    value="<%= customer.ssid !== '-' ? customer.ssid : '' %>"
-                    placeholder="<%= t('customer.wifi.new_ssid_placeholder', 'Nama WiFi baru') %>" required maxlength="32">
-                  <div class="stat-sub mt-1"><i class="bi bi-info-circle me-1"></i>Jaringan 5GHz otomatis menjadi <strong>&lt;SSID&gt;-5G</strong></div>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" for="wifiPassInput">Password Baru</label>
-                  <div class="input-group">
-                    <input type="password" class="form-control" id="wifiPassInput" name="wifi_password"
-                      placeholder="Kosongkan jika tidak ingin mengganti" minlength="8" maxlength="63"
-                      autocomplete="off" data-lpignore="true" data-form-type="other">
-                    <button class="pass-toggle" type="button" id="wifiPassToggle" aria-label="Tampilkan password">
-                      <i class="bi bi-eye" id="wifiPassToggleIcon"></i>
-                    </button>
-                  </div>
-                </div>
-                <button type="submit" class="btn-update w-100">
-                  <i class="bi bi-check-lg me-1"></i>Update Konfigurasi
-                </button>
-              </form>
+            <div class="card-body pt-2">
+              <div class="info-row">
+                <span class="k"><i class="bi bi-tag me-1"></i>Nama WiFi (SSID)</span>
+                <span class="v"><i class="bi bi-wifi me-1"></i><%= customer.ssid !== '-' ? customer.ssid : '-' %></span>
+              </div>
+              <div class="info-row">
+                <span class="k"><i class="bi bi-people me-1"></i>Perangkat Terkoneksi</span>
+                <span class="v"><%= customer.totalAssociations !== undefined && customer.totalAssociations !== '-' ? customer.totalAssociations + ' perangkat' : '-' %></span>
+              </div>
+              <div class="mt-2 small text-muted">
+                <i class="bi bi-arrow-up-circle me-1"></i>Ubah WiFi di menu paling atas halaman ini.
+              </div>
             </div>
           </div>
         </div>
@@ -1358,14 +1416,26 @@
 
     // Toggle visibility password WiFi
     document.addEventListener('DOMContentLoaded', () => {
-      const inp = document.getElementById('wifiPassInput');
-      const tgl = document.getElementById('wifiPassToggle');
-      const ico = document.getElementById('wifiPassToggleIcon');
-      if (inp && tgl && ico) {
-        tgl.addEventListener('click', function () {
-          const show = inp.type === 'password';
-          inp.type = show ? 'text' : 'password';
-          ico.className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+      // Bottom card (old)
+      const inp1 = document.getElementById('wifiPassInput');
+      const tgl1 = document.getElementById('wifiPassToggle');
+      const ico1 = document.getElementById('wifiPassToggleIcon');
+      if (inp1 && tgl1 && ico1) {
+        tgl1.addEventListener('click', function () {
+          const show = inp1.type === 'password';
+          inp1.type = show ? 'text' : 'password';
+          ico1.className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+        });
+      }
+      // Top card (new)
+      const inp2 = document.getElementById('wifiTopPass');
+      const tgl2 = document.getElementById('wifiTopPassToggle');
+      const ico2 = document.getElementById('wifiTopPassToggleIcon');
+      if (inp2 && tgl2 && ico2) {
+        tgl2.addEventListener('click', function () {
+          const show = inp2.type === 'password';
+          inp2.type = show ? 'text' : 'password';
+          ico2.className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
         });
       }
     });
