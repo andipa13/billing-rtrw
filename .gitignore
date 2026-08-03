@@ -40,6 +40,9 @@ settings.json
 /database.db
 /database.db-shm
 /database.db-wal
+/billings.db
+/billings.db-shm
+/billings.db-wal
 send_*.py
 *.backup-*
 *.bak-*
